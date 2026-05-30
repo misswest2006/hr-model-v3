@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchSlate } from "./api";
+import {
+  fetchSlate,
+  fetchYesTracker,
+  fetchYesResults,
+} from "./api";
 import "./App.css";
+import ModelHealth from "./ModelHealth";
 
 const FOUR_HOURS = 14400000;
 
@@ -31,6 +36,7 @@ const TEAM_LOGO_FALLBACKS = {
   "New York Mets": "https://a.espncdn.com/i/teamlogos/mlb/500/nym.png",
   "New York Yankees": "https://a.espncdn.com/i/teamlogos/mlb/500/nyy.png",
   Athletics: "https://a.espncdn.com/i/teamlogos/mlb/500/ath.png",
+  "Oakland Athletics": "https://a.espncdn.com/i/teamlogos/mlb/500/ath.png",
   "Philadelphia Phillies": "https://a.espncdn.com/i/teamlogos/mlb/500/phi.png",
   "Pittsburgh Pirates": "https://a.espncdn.com/i/teamlogos/mlb/500/pit.png",
   "San Diego Padres": "https://a.espncdn.com/i/teamlogos/mlb/500/sd.png",
@@ -152,23 +158,33 @@ function Metric({ label, value, tone = "" }) {
 function PlayerCard({ pick, index }) {
   return (
     <article className="player-card">
-      <div className="player-top">
+      <div className="player-top clean-player-top">
         <div className="rank-chip">#{index + 1}</div>
 
         <PlayerHeadshot pick={pick} />
 
-        <div className="player-name-block">
+        <div className="player-name-block clean-name-block">
           <h3>{pick.player}</h3>
           <p>{pick.team}</p>
-          <small>
-            Pitcher: {pick.pitcher} • Lineup Spot: {pick.lineup_spot || "-"}
-          </small>
         </div>
 
         <div className="odds-logo-block">
           <SportsbookLogo book={pick.best_book} />
           <strong>{pick.best_odds}</strong>
         </div>
+      </div>
+
+      <div className="clean-info-row">
+        <span>Pitcher: {pick.pitcher}</span>
+        <span>Lineup Spot: {pick.lineup_spot || "-"}</span>
+        <span>🕒 {pick.game_time || "-"}</span>
+        <span>📸 {pick.snapshot || "MANUAL"}</span>
+      </div>
+
+      <div className="rank-badge-row">
+        <span className="edge-badge">EDGE #{pick.top_edge_rank || "-"}</span>
+        <span className="prob-badge">PROB #{pick.top_prob_rank || "-"}</span>
+        <span className="tier-badge">{pick.tier || "WATCH"}</span>
       </div>
 
       <div className="metric-grid">
@@ -281,7 +297,11 @@ function MatchupDropdown({ group, allPicks, defaultOpen = false }) {
     <section className="matchup-card">
       <button className="matchup-header" onClick={() => setOpen(!open)}>
         <div className="matchup-title-row">
-          <TeamLogo src={group.team_logo || getTeamLogo(group.team, allPicks)} team={group.team} size="lg" />
+          <TeamLogo
+            src={group.team_logo || getTeamLogo(group.team, allPicks)}
+            team={group.team}
+            size="lg"
+          />
 
           <h2>{group.team}</h2>
 
@@ -349,6 +369,86 @@ function TeamShowcaseSection({ team, players, allPicks, rankMode = "edge" }) {
   );
 }
 
+function YesPlaysSection({ yesPicks }) {
+  const [tracker, setTracker] = useState(null);
+
+  useEffect(() => {
+    fetchYesTracker().then(setTracker).catch(console.error);
+  }, []);
+
+  return (
+    <section className="team-showcase-section">
+      <div className="page-title">
+        <h2>🔥 YES PLAYS 🔥</h2>
+        <p>Qualified plays using Model Prob, Edge, Confidence, Top Edge Rank, and Top Probability Rank</p>
+      </div>
+
+      {tracker && (
+        <div className="stats-grid" style={{ marginBottom: "24px" }}>
+          <StatCard icon="🔥" label="YES Plays" value={tracker.yes_plays} />
+          <StatCard icon="💣" label="HR Hits" value={tracker.hr_hits} />
+          <StatCard icon="⏳" label="Pending" value={tracker.pending} />
+          <StatCard icon="📈" label="Hit Rate" value={`${tracker.hit_rate}%`} />
+          <StatCard icon="💰" label="Profit" value={`${tracker.profit}u`} />
+        </div>
+      )}
+
+      {yesPicks.length === 0 ? (
+        <div className="empty-state">No YES plays found after current filters.</div>
+      ) : (
+        <div className="top3-grid">
+          {yesPicks.map((pick, index) => (
+            <PlayerCard key={`yes-${pick.player}-${index}`} pick={pick} index={index} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ResultsCenter() {
+  const [rows, setRows] = useState([]);
+
+  useEffect(() => {
+    fetchYesResults().then(setRows).catch(console.error);
+  }, []);
+
+  return (
+    <section className="team-showcase-section">
+      <div className="page-title">
+        <h2>📊 RESULTS CENTER</h2>
+        <p>Live YES play results, profit, snapshot, and grading status</p>
+      </div>
+
+      <div className="results-table">
+        <div className="results-row results-header">
+          <span>Player</span>
+          <span>Team</span>
+          <span>Snapshot</span>
+          <span>Odds</span>
+          <span>Conf</span>
+          <span>Grade</span>
+          <span>Result</span>
+          <span>Profit</span>
+        </div>
+
+        {rows.map((r, i) => (
+          <div className="results-row" key={`${r.player}-${i}`}>
+            <span>{r.player}</span>
+            <span>{r.team}</span>
+            <span>{r.snapshot}</span>
+            <span>{r.book} {r.odds}</span>
+            <span>{r.confidence}</span>
+            <span>{r.grade}</span>
+            <span>{r.result}</span>
+            <span>{r.profit}u</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export default function App() {
   const [picks, setPicks] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -380,6 +480,16 @@ export default function App() {
     return picks.filter((pick) => pick.player && pick.team);
   }, [picks]);
 
+  const yesPicks = useMemo(() => {
+    return validPicks
+      .filter((pick) => pick.play?.includes("YES"))
+      .sort((a, b) => {
+        const edgeDiff = Number(b.best_edge || 0) - Number(a.best_edge || 0);
+        if (edgeDiff !== 0) return edgeDiff;
+        return Number(b.confidence || 0) - Number(a.confidence || 0);
+      });
+  }, [validPicks]);
+
   const matchupGroups = useMemo(() => {
     const grouped = {};
 
@@ -407,8 +517,10 @@ export default function App() {
     });
 
     return Object.values(grouped).sort((a, b) => {
-      const gameSort = a.game.localeCompare(b.game);
-      if (gameSort !== 0) return gameSort;
+      const timeA = a.players[0]?.game_time_et || "";
+      const timeB = b.players[0]?.game_time_et || "";
+      const timeSort = timeA.localeCompare(timeB);
+      if (timeSort !== 0) return timeSort;
       return a.team.localeCompare(b.team);
     });
   }, [validPicks]);
@@ -479,7 +591,6 @@ export default function App() {
     return edgePercent(top);
   }, [validPicks]);
 
-  const yesPlays = validPicks.filter((pick) => pick.play?.includes("YES"));
   const totalStake = validPicks.reduce((acc, pick) => acc + Number(pick.stake || 0), 0);
   const teamCount = new Set(validPicks.map((pick) => pick.team)).size;
 
@@ -509,12 +620,24 @@ export default function App() {
             🏠 Dashboard
           </button>
 
+          <button className={activeTab === "yes" ? "active" : ""} onClick={() => switchTab("yes")}>
+            🔥 YES Plays
+          </button>
+
+          <button className={activeTab === "results" ? "active" : ""} onClick={() => switchTab("results")}>
+            📊 Results Center
+          </button>
+
           <button className={activeTab === "top" ? "active" : ""} onClick={() => switchTab("top")}>
             🔥 Top Players
           </button>
 
           <button className={activeTab === "probability" ? "active" : ""} onClick={() => switchTab("probability")}>
             📈 High Probability Plays
+          </button>
+
+          <button className={activeTab === "health" ? "active" : ""} onClick={() => switchTab("health")}>
+            🩺 Model Health
           </button>
         </nav>
 
@@ -542,34 +665,38 @@ export default function App() {
           <div className="hero-diamond hero-right">💎</div>
         </header>
 
-        <section className="stats-grid">
-          <StatCard icon="💎" label="Total Graded Plays" value={validPicks.length} />
-          <StatCard icon="🔥" label="YES Plays" value={yesPlays.length} />
-          <StatCard icon="📈" label="Avg Edge" value={avgEdge} />
-          <StatCard icon="👑" label="Top Edge" value={topEdge} />
-          <StatCard icon="💰" label="Total Stake" value={`${totalStake.toFixed(1)}u`} />
-        </section>
+        {activeTab !== "health" && (
+          <>
+            <section className="stats-grid">
+              <StatCard icon="💎" label="Total Graded Plays" value={validPicks.length} />
+              <StatCard icon="🔥" label="YES Plays" value={yesPicks.length} />
+              <StatCard icon="📈" label="Avg Edge" value={avgEdge} />
+              <StatCard icon="👑" label="Top Edge" value={topEdge} />
+              <StatCard icon="💰" label="Total Stake" value={`${totalStake.toFixed(1)}u`} />
+            </section>
 
-        <div className="toolbar">
-          <button className="refresh-btn" onClick={loadSlate}>
-            ↻ Refresh Slate
-          </button>
+            <div className="toolbar">
+              <button className="refresh-btn" onClick={loadSlate}>
+                ↻ Refresh Slate
+              </button>
 
-          <div className="updated-text">
-            Last updated:{" "}
-            {lastUpdated
-              ? lastUpdated.toLocaleString([], {
-                  month: "numeric",
-                  day: "numeric",
-                  year: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })
-              : "--"}
-          </div>
+              <div className="updated-text">
+                Last updated:{" "}
+                {lastUpdated
+                  ? lastUpdated.toLocaleString([], {
+                      month: "numeric",
+                      day: "numeric",
+                      year: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })
+                  : "--"}
+              </div>
 
-          <div className="team-count-display">{teamCount} teams loaded</div>
-        </div>
+              <div className="team-count-display">{teamCount} teams loaded</div>
+            </div>
+          </>
+        )}
 
         {activeTab === "top" && (
           <div className="page-title">
@@ -585,12 +712,20 @@ export default function App() {
           </div>
         )}
 
-        <ModelPlayOfDay pick={modelPlay} />
+        {activeTab !== "health" && activeTab !== "yes" && activeTab !== "results" && (
+          <ModelPlayOfDay pick={modelPlay} />
+        )}
 
-        {loading ? (
+        {activeTab === "health" ? (
+          <ModelHealth />
+        ) : loading ? (
           <div className="empty-state">Loading slate...</div>
         ) : validPicks.length === 0 ? (
           <div className="empty-state">No completed player rows yet. Run stat enrichment and the model.</div>
+        ) : activeTab === "yes" ? (
+          <YesPlaysSection yesPicks={yesPicks} />
+        ) : activeTab === "results" ? (
+          <ResultsCenter />
         ) : activeTab === "dashboard" ? (
           <section className="matchup-list">
             {matchupGroups.map((group, index) => (

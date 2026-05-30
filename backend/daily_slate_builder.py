@@ -1,7 +1,8 @@
 import os
 import pandas as pd
 import requests
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 
 TEAM_ABBREVIATIONS = {
@@ -74,6 +75,23 @@ def get_json(url, params=None):
     return response.json()
 
 
+def format_game_time(game_date_utc):
+    if not game_date_utc:
+        return "", "", ""
+
+    try:
+        utc_dt = datetime.fromisoformat(game_date_utc.replace("Z", "+00:00"))
+        et_dt = utc_dt.astimezone(ZoneInfo("America/New_York"))
+
+        return (
+            utc_dt.isoformat(),
+            et_dt.isoformat(),
+            et_dt.strftime("%I:%M %p").lstrip("0"),
+        )
+    except Exception:
+        return game_date_utc, "", ""
+
+
 def get_schedule(game_date=None):
     if game_date is None:
         game_date = date.today().strftime("%Y-%m-%d")
@@ -99,9 +117,16 @@ def get_schedule(game_date=None):
             away_pitcher = away.get("probablePitcher", {}).get("fullName", "TBD")
             home_pitcher = home.get("probablePitcher", {}).get("fullName", "TBD")
 
+            game_time_utc, game_time_et, game_time_display = format_game_time(
+                game.get("gameDate", "")
+            )
+
             games.append({
                 "gamePk": game["gamePk"],
                 "Date": game_date,
+                "GameTimeUTC": game_time_utc,
+                "GameTimeET": game_time_et,
+                "GameTime": game_time_display,
                 "Game": f"{away_team} vs {home_team}",
                 "AwayTeam": away_team,
                 "HomeTeam": home_team,
@@ -110,6 +135,8 @@ def get_schedule(game_date=None):
                 "AwayPitcher": away_pitcher,
                 "HomePitcher": home_pitcher,
             })
+
+    games = sorted(games, key=lambda g: g.get("GameTimeET", ""))
 
     return games
 
@@ -273,6 +300,9 @@ def add_rows(rows, game, team, opposing_pitcher, lineup):
     for hitter in lineup:
         rows.append({
             "Date": game["Date"],
+            "GameTimeUTC": game["GameTimeUTC"],
+            "GameTimeET": game["GameTimeET"],
+            "GameTime": game["GameTime"],
             "Game": game["Game"],
             "LineupSpot": hitter["spot"],
             "Player": hitter["player"],
@@ -304,7 +334,7 @@ def build_daily_slate(game_date=None):
     rows = []
 
     for game in games:
-        print(f"\n📅 {game['Game']}")
+        print(f"\n📅 {game['Game']} — {game['GameTime']} ET")
 
         away_lineup = get_best_available_lineup(game, "away")
         home_lineup = get_best_available_lineup(game, "home")
@@ -327,6 +357,12 @@ def build_daily_slate(game_date=None):
 
     df = pd.DataFrame(rows)
 
+    if not df.empty:
+        df = df.sort_values(
+            by=["GameTimeET", "Game", "Team", "LineupSpot"],
+            ascending=[True, True, True, True]
+        )
+
     output_path = os.path.join(
         os.path.dirname(__file__),
         "..",
@@ -343,8 +379,16 @@ def build_daily_slate(game_date=None):
     if len(df):
         print("\n📌 Lineup source counts:")
         print(df["LineupSource"].value_counts())
+
+        print("\n📌 Games by start time:")
+        print(
+            df[["GameTime", "Game"]]
+            .drop_duplicates()
+            .to_string(index=False)
+        )
+
         print("\n📌 Preview:")
-        print(df[["Game", "Team", "LineupSpot", "Player", "LineupSource"]].head(30))
+        print(df[["GameTime", "Game", "Team", "LineupSpot", "Player", "LineupSource"]].head(30))
 
 
 if __name__ == "__main__":

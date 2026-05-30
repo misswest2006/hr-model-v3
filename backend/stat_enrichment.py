@@ -1,9 +1,16 @@
 import os
+import sys
 import pandas as pd
 
-from baseball_data import get_hitter_stats, get_pitcher_stats
-from odds_provider import get_player_odds
-from weather_provider import get_weather_factor_for_team
+BASE_DIR = os.path.dirname(__file__)
+PROJECT_ROOT = os.path.dirname(BASE_DIR)
+
+sys.path.insert(0, BASE_DIR)
+sys.path.insert(0, PROJECT_ROOT)
+
+from backend.baseball_data import get_hitter_stats, get_pitcher_stats
+from backend.odds_provider import get_player_odds
+from backend.weather_provider import get_weather_factor_for_team
 
 
 PARK_FACTORS = {
@@ -21,6 +28,16 @@ PARK_FACTORS = {
     "Detroit Tigers": 0.98,
 }
 
+FALLBACK_PITCHER_STATS = {
+    "Hand": "R",
+    "HR9_vs_LHB": 1.25,
+    "HR9_vs_RHB": 1.25,
+    "HardHitAllowed": 40.0,
+    "BarrelAllowed": 9.0,
+    "FlyBallAllowed": 38.0,
+    "RecentHRAllowed": 0.12,
+}
+
 
 def is_blank(value):
     return pd.isna(value) or str(value).strip() == ""
@@ -34,24 +51,17 @@ def safe_set(df, idx, column, value):
 def choose_hitter_iso(hitter, pitcher_hand):
     if pitcher_hand == "R":
         return hitter["ISO_vs_RHP"]
-
     if pitcher_hand == "L":
         return hitter["ISO_vs_LHP"]
-
     return max(hitter["ISO_vs_RHP"], hitter["ISO_vs_LHP"])
 
 
 def choose_pitcher_hr9(pitcher_stats, hitter_hand):
     if hitter_hand == "L":
         return pitcher_stats["HR9_vs_LHB"]
-
     if hitter_hand == "R":
         return pitcher_stats["HR9_vs_RHB"]
-
-    return max(
-        pitcher_stats["HR9_vs_LHB"],
-        pitcher_stats["HR9_vs_RHB"]
-    )
+    return max(pitcher_stats["HR9_vs_LHB"], pitcher_stats["HR9_vs_RHB"])
 
 
 def calculate_pitcher_vulnerability(pitcher_stats):
@@ -61,7 +71,6 @@ def calculate_pitcher_vulnerability(pitcher_stats):
         + pitcher_stats["FlyBallAllowed"] * 0.25
         + pitcher_stats["RecentHRAllowed"] * 60
     )
-
     return round(score, 2)
 
 
@@ -88,37 +97,13 @@ def ensure_columns(df):
         if column not in df.columns:
             df[column] = default
 
-    numeric_columns = [
-        "ISO",
-        "Pitcher_HR9",
-        "HardHit",
-        "FlyBall",
-        "BarrelRate",
-        "ExitVelocity",
-        "LaunchAngle",
-        "RecentHRRate",
-        "PitcherVulnerability",
-        "ParkFactor",
-        "WindFactor",
-        "Matchup",
-    ]
-
-    for column in numeric_columns:
-        df[column] = pd.to_numeric(df[column], errors="coerce")
-
     return df
 
 
 def enrich_slate():
-    file_path = os.path.join(
-        os.path.dirname(__file__),
-        "..",
-        "data",
-        "sample_slate.csv"
-    )
+    file_path = os.path.join(BASE_DIR, "..", "data", "sample_slate.csv")
 
     df = pd.read_csv(file_path)
-
     df = ensure_columns(df)
 
     print("📥 Loading hitter stats...")
@@ -129,13 +114,14 @@ def enrich_slate():
 
     filled_hitters = 0
     filled_pitchers = 0
+    fallback_pitchers = 0
     filled_odds = 0
     filled_weather = 0
 
     for idx, row in df.iterrows():
-        player = str(row["Player"]).strip()
-        pitcher = str(row["Pitcher"]).strip()
-        team = str(row["Team"]).strip()
+        player = str(row.get("Player", "")).strip()
+        pitcher = str(row.get("Pitcher", "")).strip()
+        team = str(row.get("Team", "")).strip()
 
         if is_blank(player):
             continue
@@ -143,9 +129,15 @@ def enrich_slate():
         hitter = hitter_data.get(player)
         pitcher_stats = pitcher_data.get(pitcher)
 
-        if hitter and pitcher_stats:
-            hitter_hand = hitter["Hand"]
-            pitcher_hand = pitcher_stats["Hand"]
+        if not pitcher_stats:
+            pitcher_stats = FALLBACK_PITCHER_STATS
+            fallback_pitchers += 1
+        else:
+            filled_pitchers += 1
+
+        if hitter:
+            hitter_hand = hitter.get("Hand", "R")
+            pitcher_hand = pitcher_stats.get("Hand", "R")
 
             safe_set(df, idx, "ISO", choose_hitter_iso(hitter, pitcher_hand))
             safe_set(df, idx, "Pitcher_HR9", choose_pitcher_hr9(pitcher_stats, hitter_hand))
@@ -159,52 +151,12 @@ def enrich_slate():
             safe_set(df, idx, "Matchup", hitter["Matchup"])
 
             filled_hitters += 1
-            filled_pitchers += 1
-
-        elif hitter:
-            safe_set(
-                df,
-                idx,
-                "ISO",
-                max(hitter["ISO_vs_RHP"], hitter["ISO_vs_LHP"])
-            )
-
-            safe_set(df, idx, "HardHit", hitter["HardHit"])
-            safe_set(df, idx, "FlyBall", hitter["FlyBall"])
-            safe_set(df, idx, "BarrelRate", hitter["BarrelRate"])
-            safe_set(df, idx, "ExitVelocity", hitter["ExitVelocity"])
-            safe_set(df, idx, "LaunchAngle", hitter["LaunchAngle"])
-            safe_set(df, idx, "RecentHRRate", hitter["RecentHRRate"])
-            safe_set(df, idx, "Matchup", hitter["Matchup"])
-
-            filled_hitters += 1
-
-        elif pitcher_stats:
-            safe_set(
-                df,
-                idx,
-                "Pitcher_HR9",
-                max(
-                    pitcher_stats["HR9_vs_LHB"],
-                    pitcher_stats["HR9_vs_RHB"]
-                )
-            )
-
-            safe_set(
-                df,
-                idx,
-                "PitcherVulnerability",
-                calculate_pitcher_vulnerability(pitcher_stats)
-            )
-
-            filled_pitchers += 1
 
         safe_set(df, idx, "ParkFactor", PARK_FACTORS.get(team, 1.00))
         safe_set(df, idx, "WindFactor", get_weather_factor_for_team(team))
         filled_weather += 1
 
         odds = get_player_odds(player)
-
         safe_set(df, idx, "FanDuel", odds["FanDuel"])
         safe_set(df, idx, "DraftKings", odds["DraftKings"])
         safe_set(df, idx, "BetMGM", odds["BetMGM"])
@@ -215,6 +167,7 @@ def enrich_slate():
     print("✅ Slate enrichment complete")
     print(f"✅ Hitters matched: {filled_hitters}")
     print(f"✅ Pitchers matched: {filled_pitchers}")
+    print(f"⚠️ Fallback pitchers used: {fallback_pitchers}")
     print(f"✅ Weather filled: {filled_weather}")
     print(f"✅ Odds filled: {filled_odds}")
     print(f"✅ Saved to: {file_path}")

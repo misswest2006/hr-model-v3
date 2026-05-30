@@ -37,7 +37,7 @@ TEAM_ABBR = {
     "Baltimore Orioles": "bal",
     "Boston Red Sox": "bos",
     "Chicago Cubs": "chc",
-    "Chicago White Sox": "cws",
+    "Chicago White Sox": "chw",
     "Cincinnati Reds": "cin",
     "Cleveland Guardians": "cle",
     "Colorado Rockies": "col",
@@ -51,6 +51,7 @@ TEAM_ABBR = {
     "Minnesota Twins": "min",
     "New York Mets": "nym",
     "New York Yankees": "nyy",
+    "Athletics": "ath",
     "Oakland Athletics": "ath",
     "Philadelphia Phillies": "phi",
     "Pittsburgh Pirates": "pit",
@@ -95,16 +96,6 @@ def format_odds(odds):
 
 def is_blank(value):
     return pd.isna(value) or str(value).strip() == ""
-
-
-def stake_size(edge):
-    if edge >= 0.30:
-        return 2.0
-    if edge >= 0.25:
-        return 1.5
-    if edge >= 0.15:
-        return 1.0
-    return 0
 
 
 def lineup_spot_boost(lineup_spot):
@@ -222,14 +213,35 @@ def grade_play(confidence, barrel_rate, recent_hr_rate, power_score, edge):
     return "D"
 
 
-def should_play(edge, confidence, barrel_rate, recent_hr_rate, power_score):
+def base_yes_rule(model_prob, edge, confidence):
     return (
-        edge >= 0.08
-        and confidence >= 65
-        and barrel_rate >= 10
-        and recent_hr_rate >= 0.12
-        and power_score >= 85
+        model_prob >= 0.195
+        and edge >= 0.025
+        and confidence >= 63
     )
+
+
+def signal_tier(model_prob, edge, confidence):
+    if model_prob >= 0.21 and edge >= 0.04 and confidence >= 67:
+        return "TIER 1 💎"
+
+    if model_prob >= 0.195 and edge >= 0.025 and confidence >= 63:
+        return "TIER 2 🔥"
+
+    return "WATCH"
+
+
+def stake_size(play, tier):
+    if play != "YES 🔥":
+        return 0
+
+    if tier == "TIER 1 💎":
+        return 1.0
+
+    if tier == "TIER 2 🔥":
+        return 0.5
+
+    return 0
 
 
 def get_player_id(row):
@@ -239,11 +251,79 @@ def get_player_id(row):
     return str(player_id).replace(".0", "").strip()
 
 
-def run():
+def add_team_overlap_yes(results):
+    df = pd.DataFrame(results)
 
+    if df.empty:
+        return results
+
+    df["top_edge_rank"] = (
+        df.groupby("team")["best_edge"]
+        .rank(method="first", ascending=False)
+        .astype(int)
+    )
+
+    df["top_prob_rank"] = (
+        df.groupby("team")["model_prob"]
+        .rank(method="first", ascending=False)
+        .astype(int)
+    )
+
+    df["is_top3_edge"] = df["top_edge_rank"] <= 3
+    df["is_top4_prob"] = df["top_prob_rank"] <= 4
+
+    df["overlap_candidate"] = (
+        df["is_top3_edge"]
+        & df["is_top4_prob"]
+        & df.apply(
+            lambda row: base_yes_rule(
+                float(row["model_prob"]),
+                float(row["best_edge"]),
+                int(row["confidence"])
+            ),
+            axis=1
+        )
+    )
+
+    df["play"] = "NO"
+    df["tier"] = "WATCH"
+    df["stake"] = 0.0
+
+    for team, group in df.groupby("team"):
+        overlap = group[group["overlap_candidate"]].copy()
+
+        if overlap.empty:
+            continue
+
+        overlap = overlap.sort_values(
+            by=["best_edge", "model_prob", "confidence"],
+            ascending=[False, False, False]
+        )
+
+        best_idx = overlap.index[0]
+
+        model_prob = float(df.loc[best_idx, "model_prob"])
+        edge = float(df.loc[best_idx, "best_edge"])
+        confidence = int(df.loc[best_idx, "confidence"])
+
+        tier = signal_tier(model_prob, edge, confidence)
+
+        df.loc[best_idx, "play"] = "YES 🔥"
+        df.loc[best_idx, "tier"] = tier
+        df.loc[best_idx, "stake"] = stake_size("YES 🔥", tier)
+
+    return df.to_dict(orient="records")
+
+
+def run():
     print("🚀 SCRIPT LOADED")
     print("🤖 TRAINED HR MODEL STARTED")
-    print("⚙️ Probability calibration + lineup boost enabled")
+    print("🔥 YES rule:")
+    print("ModelProb >= 19.5%")
+    print("Edge >= +2.5%")
+    print("Confidence >= 63")
+    print("Player appears in Top 3 Edge AND Top 4 Model Prob")
+    print("Only strongest overlap player per team becomes YES")
 
     file_path = os.path.join(
         os.path.dirname(__file__),
@@ -259,7 +339,6 @@ def run():
     results = []
 
     for _, row in df.iterrows():
-
         required = [
             "Player",
             "ISO",
@@ -320,9 +399,7 @@ def run():
                 features["RecentHRRate"],
             )
 
-            lineup_boost = lineup_spot_boost(
-                row.get("LineupSpot", 0)
-            )
+            lineup_boost = lineup_spot_boost(row.get("LineupSpot", 0))
 
             model_prob = calibrate_probability(
                 raw_model_prob,
@@ -338,7 +415,6 @@ def run():
         book_results = []
 
         for book in books:
-
             if book not in row or is_blank(row[book]):
                 continue
 
@@ -392,21 +468,14 @@ def run():
             edge
         )
 
-        stake = stake_size(edge)
-
-        play = "YES 🔥" if should_play(
-            edge,
-            confidence,
-            barrel_rate,
-            recent_hr_rate,
-            power_score
-        ) else "NO"
-
         player_id = get_player_id(row)
         team = row["Team"]
 
         results.append({
             "date": row["Date"],
+            "game_time": row.get("GameTime", ""),
+            "game_time_et": row.get("GameTimeET", ""),
+            "snapshot": os.getenv("MODEL_SNAPSHOT_LABEL", "MANUAL"), 
             "game": row["Game"],
             "lineup_spot": row.get("LineupSpot", ""),
             "player": row["Player"],
@@ -424,17 +493,32 @@ def run():
             "best_odds": best_book["odds"],
             "best_edge": round(float(edge), 4),
             "confidence": confidence,
-            "stake": stake,
+            "stake": 0,
             "grade": grade,
-            "play": play,
+            "tier": "WATCH",
+            "top_edge_rank": 999,
+            "top_prob_rank": 999,
+            "is_top3_edge": False,
+            "is_top4_prob": False,
+            "overlap_candidate": False,
+            "play": "NO",
             "all_books": book_results,
         })
 
+    results = add_team_overlap_yes(results)
+
     results = sorted(
         results,
-        key=lambda x: x["best_edge"],
+        key=lambda x: (
+            x["play"] == "YES 🔥",
+            x["tier"] == "TIER 1 💎",
+            x["best_edge"],
+            x["confidence"],
+        ),
         reverse=True
     )
+
+    yes_count = sum(1 for r in results if r["play"] == "YES 🔥")
 
     print("\n🔥 ALL TRAINED MODEL HR PLAYS 🔥\n")
 
@@ -443,6 +527,8 @@ def run():
     else:
         for r in results:
             print(r)
+
+    print(f"\n🔥 YES PLAYS FOUND: {yes_count}\n")
 
     save_results(results)
 

@@ -640,6 +640,72 @@ nav button:hover {
   align-items: center;
 }
 
+.clean-player-top {
+  align-items: center;
+  gap: 18px;
+}
+
+.clean-name-block {
+  flex: 1;
+}
+
+.clean-info-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin: 18px 0 16px;
+  font-size: 0.88rem;
+  color: #fff;
+}
+
+.rank-badge-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+
+.edge-badge,
+.prob-badge,
+.tier-badge {
+  padding: 12px 18px;
+  border-radius: 12px;
+  font-weight: 900;
+  font-size: 0.9rem;
+  letter-spacing: 0.5px;
+}
+
+.edge-badge {
+  background: rgba(255, 20, 147, 0.45);
+  color: #ff9ad8;
+}
+
+.prob-badge {
+  background: rgba(255, 215, 0, 0.25);
+  color: #ffd700;
+}
+
+.tier-badge {
+  background: rgba(0, 255, 170, 0.16);
+  color: #00ffaa;
+}
+
+.clean-player-top {
+  display: grid;
+  grid-template-columns: 48px 76px 1fr auto;
+  align-items: center;
+  gap: 16px;
+}
+
+.clean-info-row {
+  white-space: nowrap;
+}
+
+.player-card {
+  overflow: hidden;
+}
+
 .rank-chip {
   width: 48px;
   height: 48px;
@@ -667,6 +733,15 @@ nav button:hover {
 
 .player-name-block small {
   color: var(--muted);
+}
+
+.player-meta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+  color: #ddd;
+  margin-top: 4px;
 }
 
 .odds-logo-block {
@@ -868,4 +943,125 @@ nav button:hover {
     grid-column: 1 / -1;
     align-items: flex-start;
   }
+
+  .health-page {
+  display: grid;
+  gap: 24px;
+}
+
+.health-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(140px, 1fr));
+  gap: 16px;
+}
+
+.health-card,
+.health-section,
+.recent-health-card {
+  background: rgba(0, 0, 0, 0.95);
+  border: 1px solid rgba(255, 20, 147, 0.65);
+  border-radius: 22px;
+  box-shadow: 0 0 22px rgba(255, 20, 147, 0.18);
+}
+
+.health-card {
+  padding: 18px;
+}
+
+.health-card span {
+  color: #f7c7df;
+  font-size: 13px;
+}
+
+.health-card strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 30px;
+  color: white;
+}
+
+.health-section {
+  padding: 22px;
+}
+
+.health-section h3 {
+  margin: 0 0 18px;
+  color: #ff1493;
+  font-size: 26px;
+}
+
+.health-table {
+  display: grid;
+  gap: 8px;
+}
+
+.health-row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 10px;
+  padding: 13px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.health-head {
+  color: #ff75c7;
+  font-weight: 900;
+}
+
+.recent-health-list {
+  display: grid;
+  gap: 12px;
+}
+
+.recent-health-card {
+  padding: 14px;
+  display: grid;
+  grid-template-columns: 2fr repeat(4, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.recent-health-card p {
+  margin: 5px 0 0;
+  color: #f7c7df;
+}
+
+.recent-health-card span {
+  color: #ff75c7;
+  font-size: 12px;
+}
+
+.recent-health-card strong {
+  color: white;
+}
+
+@media (max-width: 1180px) {
+  .health-stats-grid,
+  .health-row,
+  .recent-health-card {
+    grid-template-columns: 1fr;
+  }
+}
+}
+
+.results-table {
+  display: grid;
+  gap: 8px;
+}
+
+.results-row {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1fr 1fr .7fr .7fr .9fr .8fr;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  align-items: center;
+}
+
+.results-header {
+  color: #ff75c7;
+  font-weight: 900;
+  background: rgba(255, 20, 147, 0.16);
 }

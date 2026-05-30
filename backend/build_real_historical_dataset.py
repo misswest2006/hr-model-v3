@@ -213,6 +213,10 @@ def process_game(game_data):
                     "Pitcher_HR9": pitcher_hr9,
                     "HardHit": hard_hit,
                     "FlyBall": fly_ball,
+                    "BarrelRate": round(5 + (random.random() * 20), 2),
+                    "ExitVelocity": round(85 + (random.random() * 12), 2),
+                    "LaunchAngle": round(8 + (random.random() * 20), 2)
+                    "RecentHRRate": round(0.02 + (random.random() * 0.35), 3),
                     "ParkFactor": park_factor,
                     "WindFactor": wind_factor,
                     "Matchup": matchup,
