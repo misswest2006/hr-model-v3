@@ -6,6 +6,11 @@ import {
 } from "./api";
 import "./App.css";
 import ModelHealth from "./ModelHealth";
+import ConfidenceAnalytics from "./ConfidenceAnalytics";
+import SnapshotAnalytics from "./SnapshotAnalytics";
+import TopPerformerAnalytics from "./TopPerformerAnalytics";
+import FeatureAnalytics from "./FeatureAnalytics";
+import AutoTuner from "./AutoTuner";
 
 const FOUR_HOURS = 14400000;
 
@@ -639,6 +644,26 @@ export default function App() {
           <button className={activeTab === "health" ? "active" : ""} onClick={() => switchTab("health")}>
             🩺 Model Health
           </button>
+
+          <button className={activeTab === "confidence" ? "active" : ""} onClick={() => switchTab("confidence")}>
+            📈 Confidence Analytics
+          </button>
+
+          <button className={activeTab === "snapshot" ? "active" : ""} onClick={() => switchTab("snapshot")}
+          > 📸 Snapshot Analytics
+          </button>
+
+          <button className={activeTab === "performers" ? "active" : ""} onClick={() => switchTab("performers")}>
+            🏆 Top Performers
+          </button>
+
+          <button className={activeTab === "features" ? "active" : ""} onClick={() => switchTab("features")}>
+            🧬 Feature Analytics
+          </button>
+
+          <button className={activeTab === "autotuner" ? "active" : ""}  onClick={() => switchTab("autotuner")}>
+            🤖 Auto Tuner
+          </button>
         </nav>
 
         <div className="bankroll-card">
@@ -726,6 +751,16 @@ export default function App() {
           <YesPlaysSection yesPicks={yesPicks} />
         ) : activeTab === "results" ? (
           <ResultsCenter />
+        ) : activeTab === "confidence" ? (
+          <ConfidenceAnalytics /> 
+         ) : activeTab === "snapshot" ? (
+          <SnapshotAnalytics />
+        ) : activeTab === "performers" ? (
+          <TopPerformerAnalytics />
+        ) : activeTab === "features" ? (
+          <FeatureAnalytics />
+          ) : activeTab === "autotuner" ? (
+          <AutoTuner />
         ) : activeTab === "dashboard" ? (
           <section className="matchup-list">
             {matchupGroups.map((group, index) => (

@@ -26,3 +26,28 @@ export const fetchYesResults = async () => {
   const res = await axios.get(`${API_BASE}/yes-results`);
   return res.data;
 };
+
+export const fetchConfidenceAnalytics = async () => {
+  const res = await axios.get(`${API_BASE}/confidence-analytics`);
+  return res.data;
+};
+
+export const fetchSnapshotAnalytics = async () => {
+  const res = await axios.get(`${API_BASE}/snapshot-analytics`);
+  return res.data;
+};
+
+export const fetchTopPerformerAnalytics = async () => {
+  const res = await axios.get(`${API_BASE}/top-performer-analytics`);
+  return res.data;
+};
+
+export const fetchFeatureAnalytics = async () => {
+  const res = await axios.get(`${API_BASE}/feature-analytics`);
+  return res.data;
+};
+
+export const fetchAutoTuner = async () => {
+  const res = await axios.get(`${API_BASE}/auto-tuner`);
+  return res.data;
+};
