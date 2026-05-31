@@ -51,3 +51,13 @@ export const fetchAutoTuner = async () => {
   const res = await axios.get(`${API_BASE}/auto-tuner`);
   return res.data;
 };
+
+export const fetchEvAnalytics = async () => {
+  const res = await axios.get(`${API_BASE}/ev-analytics`);
+  return res.data;
+};
+
+export const fetchTeamAnalytics = async () => {
+  const res = await axios.get(`${API_BASE}/team-analytics`);
+  return res.data;
+};

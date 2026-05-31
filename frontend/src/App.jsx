@@ -11,6 +11,8 @@ import SnapshotAnalytics from "./SnapshotAnalytics";
 import TopPerformerAnalytics from "./TopPerformerAnalytics";
 import FeatureAnalytics from "./FeatureAnalytics";
 import AutoTuner from "./AutoTuner";
+import EvAnalytics from "./EvAnalytics";
+import TeamAnalytics from "./TeamAnalytics";
 
 const FOUR_HOURS = 14400000;
 
@@ -664,6 +666,14 @@ export default function App() {
           <button className={activeTab === "autotuner" ? "active" : ""}  onClick={() => switchTab("autotuner")}>
             🤖 Auto Tuner
           </button>
+
+          <button className={activeTab === "ev" ? "active" : ""} onClick={() => switchTab("ev")}>
+            💰 EV Analytics
+          </button>
+
+         <button className={activeTab === "teams" ? "active" : ""} onClick={() => switchTab("teams")}>
+            🏟️ Team Analytics
+         </button> 
         </nav>
 
         <div className="bankroll-card">
@@ -753,14 +763,18 @@ export default function App() {
           <ResultsCenter />
         ) : activeTab === "confidence" ? (
           <ConfidenceAnalytics /> 
-         ) : activeTab === "snapshot" ? (
+        ) : activeTab === "snapshot" ? (
           <SnapshotAnalytics />
         ) : activeTab === "performers" ? (
           <TopPerformerAnalytics />
         ) : activeTab === "features" ? (
           <FeatureAnalytics />
-          ) : activeTab === "autotuner" ? (
+        ) : activeTab === "autotuner" ? (
           <AutoTuner />
+        ) : activeTab === "ev" ? (
+          <EvAnalytics />
+        ) : activeTab === "teams" ? (
+           <TeamAnalytics />
         ) : activeTab === "dashboard" ? (
           <section className="matchup-list">
             {matchupGroups.map((group, index) => (

@@ -705,3 +705,221 @@ def auto_tuner():
         return {
             "error": str(e)
         }
+
+@app.get("/ev-analytics")
+def ev_analytics():
+    df = load_history()
+
+    empty = {
+        "best_ev_play": {},
+        "average_edge": 0,
+        "total_yes_plays": 0,
+        "plays": [],
+    }
+
+    if df.empty:
+        return empty
+
+    yes_df = df[df["Play"] == "YES 🔥"].copy()
+
+    yes_df = yes_df.sort_values(
+    by=["Date", "Snapshot", "Player", "Edge"],
+    ascending=[True, True, True, False],
+)
+
+    yes_df = yes_df.drop_duplicates(
+    subset=["Date", "Player"],
+    keep="last",
+)
+
+    if yes_df.empty:
+        return empty
+
+    for col in ["Player", "Team", "BestBook", "BestOdds", "ModelProb", "Edge", "Confidence", "Result", "Profit"]:
+        if col not in yes_df.columns:
+            yes_df[col] = ""
+
+    yes_df["ModelProb"] = pd.to_numeric(yes_df["ModelProb"], errors="coerce").fillna(0)
+    yes_df["Edge"] = pd.to_numeric(yes_df["Edge"], errors="coerce").fillna(0)
+    yes_df["Confidence"] = pd.to_numeric(yes_df["Confidence"], errors="coerce").fillna(0)
+    yes_df["Profit"] = pd.to_numeric(yes_df["Profit"], errors="coerce").fillna(0)
+
+    def implied_prob(odds):
+        try:
+            odds = float(str(odds).replace("+", "").strip())
+            if odds > 0:
+                return 100 / (odds + 100)
+            return abs(odds) / (abs(odds) + 100)
+        except Exception:
+            return 0
+
+    plays = []
+
+    for _, row in yes_df.iterrows():
+        model_prob = float(row.get("ModelProb", 0))
+        odds = row.get("BestOdds", "")
+        implied = implied_prob(odds)
+        edge = model_prob - implied
+
+        plays.append({
+            "player": row.get("Player", ""),
+            "team": row.get("Team", ""),
+            "book": row.get("BestBook", ""),
+            "odds": odds,
+            "model_prob": round(model_prob * 100, 1),
+            "implied_prob": round(implied * 100, 1),
+            "ev_edge": round(edge * 100, 1),
+            "confidence": row.get("Confidence", ""),
+            "result": clean_result(row.get("Result", "")),
+            "profit": round(float(row.get("Profit", 0)), 2),
+        })
+
+    plays = sorted(plays, key=lambda x: x["ev_edge"], reverse=True)
+
+    avg_edge = round(
+        sum(p["ev_edge"] for p in plays) / len(plays),
+        1
+    ) if plays else 0
+
+    return {
+        "best_ev_play": plays[0] if plays else {},
+        "average_edge": avg_edge,
+        "total_yes_plays": len(plays),
+        "plays": plays[:75],
+    }
+
+@app.get("/team-analytics")
+def team_analytics():
+    df = load_history()
+
+    empty = {
+        "best_team": {},
+        "worst_team": {},
+        "teams": [],
+    }
+
+    if df.empty:
+        return empty
+
+    yes_df = df[df["Play"] == "YES 🔥"].copy()
+
+    if yes_df.empty:
+        return empty
+
+    for col in ["Team", "Result", "Profit", "Stake"]:
+        if col not in yes_df.columns:
+            yes_df[col] = ""
+
+    yes_df["Team"] = yes_df["Team"].fillna("").astype(str).str.strip()
+    yes_df["Result"] = yes_df["Result"].fillna("").astype(str).str.upper().str.strip()
+    yes_df["Profit"] = pd.to_numeric(yes_df["Profit"], errors="coerce").fillna(0)
+    yes_df["Stake"] = pd.to_numeric(yes_df["Stake"], errors="coerce").fillna(0)
+
+    rows = []
+
+    for team, tdf in yes_df.groupby("Team"):
+        if not team:
+            continue
+
+        plays = len(tdf)
+        hr_hits = int((tdf["Result"] == "HR").sum())
+        profit = round(tdf["Profit"].sum(), 2)
+        stake = round(tdf["Stake"].sum(), 2)
+
+        hit_rate = round((hr_hits / plays * 100), 1) if plays else 0
+        roi = round((profit / stake * 100), 1) if stake else 0
+
+        if plays < 3:
+            signal = "Small Sample"
+        elif roi > 25:
+            signal = "🔥 Strong"
+        elif roi > 0:
+            signal = "✅ Positive"
+        elif hr_hits > 0:
+            signal = "⚠️ Watch"
+        else:
+            signal = "❌ Weak"
+
+        rows.append({
+            "team": team,
+            "plays": plays,
+            "hr_hits": hr_hits,
+            "hit_rate": hit_rate,
+            "profit": profit,
+            "stake": stake,
+            "roi": roi,
+            "signal": signal,
+        })
+
+    rows = sorted(
+        rows,
+        key=lambda x: (x["roi"], x["hit_rate"], x["hr_hits"]),
+        reverse=True,
+    )
+
+    qualified = [r for r in rows if r["plays"] >= 3]
+
+    best_team = qualified[0] if qualified else (rows[0] if rows else {})
+    worst_team = sorted(qualified, key=lambda x: x["roi"])[0] if qualified else {}
+
+    return {
+        "best_team": best_team,
+        "worst_team": worst_team,
+        "teams": rows,
+    }
+
+@app.get("/generate-player-adjustments")
+def generate_player_adjustments():
+
+    df = load_history()
+
+    if df.empty:
+        return {"status": "no data"}
+
+    yes_df = df[df["Play"] == "YES 🔥"].copy()
+
+    rows = []
+
+    for player, pdf in yes_df.groupby("Player"):
+
+        plays = len(pdf)
+
+        if plays < 3:
+            continue
+
+        hr_hits = int(
+            (pdf["Result"] == "HR").sum()
+        )
+
+        hit_rate = hr_hits / plays
+
+        bonus = 0
+
+        if hit_rate >= 0.30:
+            bonus = 3
+        elif hit_rate >= 0.20:
+            bonus = 2
+        elif hit_rate >= 0.15:
+            bonus = 1
+        elif hit_rate <= 0.05:
+            bonus = -2
+
+        rows.append({
+            "Player": player,
+            "Bonus": bonus
+        })
+
+    adj = pd.DataFrame(rows)
+
+    adj.to_csv(
+        os.path.join(
+            DATA_DIR,
+            "player_adjustments.csv"
+        ),
+        index=False
+    )
+
+    return {
+        "players": len(adj),
+        "saved": True
+    }

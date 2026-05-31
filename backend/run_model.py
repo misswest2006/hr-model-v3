@@ -4,6 +4,7 @@ import joblib
 
 from core.odds import implied_prob
 from save_results import save_results
+from player_adjustments import get_player_bonus
 
 
 FEATURES = [
@@ -459,6 +460,11 @@ def run():
             power_score,
             lineup_boost
         )
+
+        player_bonus = get_player_bonus(row["Player"])
+
+        confidence += player_bonus
+        confidence = min(max(round(confidence), 0), 99)
 
         grade = grade_play(
             confidence,
