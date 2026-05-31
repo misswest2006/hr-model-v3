@@ -488,14 +488,26 @@ export default function App() {
   }, [picks]);
 
   const yesPicks = useMemo(() => {
-    return validPicks
-      .filter((pick) => pick.play?.includes("YES"))
-      .sort((a, b) => {
-        const edgeDiff = Number(b.best_edge || 0) - Number(a.best_edge || 0);
-        if (edgeDiff !== 0) return edgeDiff;
-        return Number(b.confidence || 0) - Number(a.confidence || 0);
-      });
-  }, [validPicks]);
+  const tierScore = (pick) => {
+    const tier = String(pick.tier || "").toUpperCase();
+
+    if (tier.includes("TIER 1")) return 3;
+    if (tier.includes("TIER 2")) return 2;
+    return 1;
+  };
+
+  return validPicks
+    .filter((pick) => pick.play?.includes("YES"))
+    .sort((a, b) => {
+      const tierDiff = tierScore(b) - tierScore(a);
+      if (tierDiff !== 0) return tierDiff;
+
+      const edgeDiff = Number(b.best_edge || 0) - Number(a.best_edge || 0);
+      if (edgeDiff !== 0) return edgeDiff;
+
+      return Number(b.confidence || 0) - Number(a.confidence || 0);
+    });
+}, [validPicks]);
 
   const matchupGroups = useMemo(() => {
     const grouped = {};

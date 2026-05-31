@@ -119,6 +119,52 @@ def lineup_spot_boost(lineup_spot):
         return 1.00
 
 
+def pitcher_weakness_score(row):
+    try:
+        hr9 = float(row.get("Pitcher_HR9", 1.0) or 1.0)
+    except Exception:
+        hr9 = 1.0
+
+    try:
+        vulnerability = float(row.get("PitcherVulnerability", 45) or 45)
+    except Exception:
+        vulnerability = 45
+
+    try:
+        matchup = float(row.get("Matchup", 0.5) or 0.5)
+    except Exception:
+        matchup = 0.5
+
+    score = 0
+
+    if hr9 >= 1.8:
+        score += 4
+    elif hr9 >= 1.5:
+        score += 3
+    elif hr9 >= 1.25:
+        score += 2
+    elif hr9 >= 1.0:
+        score += 1
+
+    if vulnerability >= 60:
+        score += 4
+    elif vulnerability >= 52:
+        score += 3
+    elif vulnerability >= 45:
+        score += 2
+    elif vulnerability >= 38:
+        score += 1
+
+    if matchup >= 0.75:
+        score += 3
+    elif matchup >= 0.65:
+        score += 2
+    elif matchup >= 0.55:
+        score += 1
+
+    return min(score, 10)
+
+
 def calculate_power_score(
     iso,
     hard_hit,
@@ -408,6 +454,17 @@ def run():
                 lineup_boost
             )
 
+            pitcher_score = pitcher_weakness_score(row)
+
+            if pitcher_score >= 8:
+                model_prob *= 1.12
+            elif pitcher_score >= 6:
+                model_prob *= 1.08
+            elif pitcher_score >= 4:
+                model_prob *= 1.04
+
+            model_prob = min(max(model_prob, 0.01), 0.42)
+
         except Exception as e:
             print(f"⚠️ Failed processing {row.get('Player', 'Unknown')}")
             print(e)
@@ -461,6 +518,9 @@ def run():
             lineup_boost
         )
 
+        confidence += pitcher_score
+        confidence = min(max(round(confidence), 0), 99)
+
         player_bonus = get_player_bonus(row["Player"])
 
         confidence += player_bonus
@@ -481,7 +541,7 @@ def run():
             "date": row["Date"],
             "game_time": row.get("GameTime", ""),
             "game_time_et": row.get("GameTimeET", ""),
-            "snapshot": os.getenv("MODEL_SNAPSHOT_LABEL", "MANUAL"), 
+            "snapshot": os.getenv("MODEL_SNAPSHOT_LABEL", "MANUAL"),
             "game": row["Game"],
             "lineup_spot": row.get("LineupSpot", ""),
             "player": row["Player"],
@@ -491,6 +551,7 @@ def run():
             "team_logo": team_logo_url(team),
             "team_abbr": team_abbr(team),
             "pitcher": row["Pitcher"],
+            "pitcher_weakness_score": pitcher_score,
             "model_prob": round(float(model_prob), 4),
             "raw_model_prob": round(float(raw_model_prob), 4),
             "power_score": power_score,
@@ -499,6 +560,7 @@ def run():
             "best_odds": best_book["odds"],
             "best_edge": round(float(edge), 4),
             "confidence": confidence,
+            "player_bonus": player_bonus,
             "stake": 0,
             "grade": grade,
             "tier": "WATCH",
