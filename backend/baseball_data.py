@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+import unicodedata
 
 
 def safe(value):
@@ -7,6 +8,18 @@ def safe(value):
         return float(value)
     except Exception:
         return 0.0
+
+
+def clean_name(name):
+    if pd.isna(name):
+        return ""
+
+    name = str(name).strip().lower()
+    name = unicodedata.normalize("NFKD", name)
+    name = "".join(ch for ch in name if not unicodedata.combining(ch))
+    name = " ".join(name.split())
+
+    return name
 
 
 def get_hitter_stats():
@@ -18,11 +31,12 @@ def get_hitter_stats():
     )
 
     df = pd.read_csv(file_path)
-
     hitters = {}
 
     for _, row in df.iterrows():
-        hitters[row["Player"]] = {
+        key = clean_name(row["Player"])
+
+        hitters[key] = {
             "Hand": row["Hand"],
             "ISO_vs_RHP": safe(row["ISO_vs_RHP"]),
             "ISO_vs_LHP": safe(row["ISO_vs_LHP"]),
@@ -48,11 +62,12 @@ def get_pitcher_stats():
     )
 
     df = pd.read_csv(file_path)
-
     pitchers = {}
 
     for _, row in df.iterrows():
-        pitchers[row["Pitcher"]] = {
+        key = clean_name(row["Pitcher"])
+
+        pitchers[key] = {
             "Hand": row["Hand"],
             "HR9_vs_LHB": safe(row["HR9_vs_LHB"]),
             "HR9_vs_RHB": safe(row["HR9_vs_RHB"]),

@@ -14,7 +14,6 @@ BOOKMAKER_KEYS = {
     "betmgm": "BetMGM",
 }
 
-
 FALLBACK_ODDS = {
     "Aaron Judge": [220, 260],
     "Shohei Ohtani": [240, 290],
@@ -29,7 +28,6 @@ FALLBACK_ODDS = {
     "Logan O'Hoppe": [400, 650],
     "Jorge Soler": [350, 600],
 }
-
 
 _ODDS_CACHE = None
 
@@ -60,23 +58,29 @@ def american_to_int(price):
 
 
 def clean_name(name):
-    return str(name or "").strip().lower().replace(".", "").replace("’", "'")
+    return (
+        str(name or "")
+        .strip()
+        .lower()
+        .replace(".", "")
+        .replace("’", "'")
+    )
 
 
 def normalize_book_name(book_key, book_title):
     key = str(book_key or "").lower().strip()
-    title = str(book_title or "").strip()
+    title = str(book_title or "").lower().strip()
 
     if key in BOOKMAKER_KEYS:
         return BOOKMAKER_KEYS[key]
 
-    if "fanduel" in title.lower():
+    if "fanduel" in title:
         return "FanDuel"
 
-    if "draftkings" in title.lower():
+    if "draftkings" in title:
         return "DraftKings"
 
-    if "betmgm" in title.lower():
+    if "betmgm" in title:
         return "BetMGM"
 
     return None
@@ -84,6 +88,7 @@ def normalize_book_name(book_key, book_title):
 
 def fetch_events():
     if not ODDS_API_KEY:
+        print("⚠️ Missing ODDS_API_KEY. Using fallback odds.")
         return []
 
     url = f"https://api.the-odds-api.com/v4/sports/{SPORT}/events"
@@ -112,7 +117,6 @@ def fetch_event_hr_odds(event_id):
     params = {
         "apiKey": ODDS_API_KEY,
         "regions": "us",
-        "markets": MARKET,
         "oddsFormat": "american",
         "dateFormat": "iso",
         "bookmakers": "fanduel,draftkings,betmgm",
@@ -128,6 +132,37 @@ def fetch_event_hr_odds(event_id):
         return None
 
 
+def extract_player_from_outcome(outcome):
+    name = str(outcome.get("name", "")).strip()
+    description = str(outcome.get("description", "")).strip()
+    price = american_to_int(outcome.get("price"))
+
+    if price is None:
+        return None, None
+
+    name_lower = name.lower()
+    desc_lower = description.lower()
+
+    # Common Odds API format:
+    # name = Over, description = Player Name
+    if name_lower == "over" and description:
+        return description, price
+
+    # Alternate format:
+    # name = Player Name, description = Over
+    if desc_lower == "over" and name:
+        return name, price
+
+    # Some feeds may use point-based Over with player in description
+    if "over" in name_lower and description:
+        return description, price
+
+    if "over" in desc_lower and name:
+        return name, price
+
+    return None, None
+
+
 def build_odds_lookup():
     lookup = {}
 
@@ -137,6 +172,8 @@ def build_odds_lookup():
         return lookup
 
     print(f"📡 Odds API events found: {len(events)}")
+
+    debug_printed = False
 
     for event in events:
         event_id = event.get("id")
@@ -159,15 +196,20 @@ def build_odds_lookup():
                 continue
 
             for market in bookmaker.get("markets", []):
-                if market.get("key") != MARKET:
+                market_key = market.get("key")
+               
+                if market_key != MARKET:
                     continue
 
-                for outcome in market.get("outcomes", []):
-                    if outcome.get("name") != "Over":
-                        continue
+                outcomes = market.get("outcomes", [])
 
-                    player = outcome.get("description") or outcome.get("name")
-                    price = american_to_int(outcome.get("price"))
+                if outcomes and not debug_printed:
+                    print("🔎 DEBUG MARKET:", market_key)
+                    print("🔎 DEBUG FIRST OUTCOME:", outcomes[0])
+                    debug_printed = True
+
+                for outcome in outcomes:
+                    player, price = extract_player_from_outcome(outcome)
 
                     if not player or price is None:
                         continue
@@ -196,10 +238,10 @@ def get_player_odds(player):
     odds_lookup = get_odds_cache()
     key = clean_name(player)
 
+    fallback = fallback_player_odds(player)
+
     if key in odds_lookup:
         real = odds_lookup[key]
-
-        fallback = fallback_player_odds(player)
 
         return {
             "FanDuel": real.get("FanDuel", fallback["FanDuel"]),
@@ -207,11 +249,12 @@ def get_player_odds(player):
             "BetMGM": real.get("BetMGM", fallback["BetMGM"]),
         }
 
-    return fallback_player_odds(player)
+    return fallback
 
 
 if __name__ == "__main__":
     odds = build_odds_lookup()
     print(f"Players with real odds: {len(odds)}")
-    for name, prices in list(odds.items())[:20]:
+
+    for name, prices in list(odds.items())[:30]:
         print(name, prices)

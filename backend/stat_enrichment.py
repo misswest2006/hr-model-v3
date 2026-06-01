@@ -4,12 +4,15 @@ import pandas as pd
 
 BASE_DIR = os.path.dirname(__file__)
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
+DATA_DIR = os.path.join(BASE_DIR, "..", "data")
+
+SLATE_PATH = os.path.join(DATA_DIR, "sample_slate.csv")
 
 sys.path.insert(0, BASE_DIR)
 sys.path.insert(0, PROJECT_ROOT)
 
-from backend.baseball_data import get_hitter_stats, get_pitcher_stats
-from backend.odds_provider import get_player_odds
+from backend.baseball_data import get_hitter_stats, get_pitcher_stats, clean_name
+from backend.sgo_odds_provider import build_sgo_hr_odds_lookup, clean_name
 from backend.weather_provider import get_weather_factor_for_team
 
 
@@ -27,6 +30,7 @@ PARK_FACTORS = {
     "Los Angeles Angels": 1.00,
     "Detroit Tigers": 0.98,
 }
+
 
 FALLBACK_PITCHER_STATS = {
     "Hand": "R",
@@ -64,6 +68,18 @@ def choose_pitcher_hr9(pitcher_stats, hitter_hand):
     return max(pitcher_stats["HR9_vs_LHB"], pitcher_stats["HR9_vs_RHB"])
 
 
+def choose_pitcher_weak_side(pitcher_stats):
+    lhb_hr9 = float(pitcher_stats.get("HR9_vs_LHB", 0))
+    rhb_hr9 = float(pitcher_stats.get("HR9_vs_RHB", 0))
+
+    if lhb_hr9 > rhb_hr9:
+        return "L"
+    if rhb_hr9 > lhb_hr9:
+        return "R"
+
+    return "BOTH"
+
+
 def calculate_pitcher_vulnerability(pitcher_stats):
     score = (
         pitcher_stats["HardHitAllowed"] * 0.35
@@ -72,6 +88,31 @@ def calculate_pitcher_vulnerability(pitcher_stats):
         + pitcher_stats["RecentHRAllowed"] * 60
     )
     return round(score, 2)
+
+
+def estimate_pitcher_hr_spot_weakness(pitcher_stats):
+    """
+    Estimated pitcher HR weak lineup bucket.
+
+    This is not true batter-order historical data yet.
+    It estimates where HR damage is most likely based on pitcher weakness profile.
+
+    4-6 = middle-order danger zone
+    1-3 = top-order exposure
+    7-9 = lower-order exposure
+    """
+    vulnerability = calculate_pitcher_vulnerability(pitcher_stats)
+    barrel = float(pitcher_stats.get("BarrelAllowed", 0))
+    hard_hit = float(pitcher_stats.get("HardHitAllowed", 0))
+    recent_hr = float(pitcher_stats.get("RecentHRAllowed", 0))
+
+    if vulnerability >= 48 or barrel >= 10 or recent_hr >= 0.14:
+        return "4-6"
+
+    if hard_hit >= 38:
+        return "1-3"
+
+    return "7-9"
 
 
 def ensure_columns(df):
@@ -88,6 +129,9 @@ def ensure_columns(df):
         "ParkFactor": 1.0,
         "WindFactor": 1.0,
         "Matchup": 0.0,
+        "BatterHand": "",
+        "PitcherHRWeakSide": "",
+        "PitcherHRSpotWeakness": "",
         "FanDuel": "",
         "DraftKings": "",
         "BetMGM": "",
@@ -106,11 +150,18 @@ def enrich_slate():
     df = pd.read_csv(file_path)
     df = ensure_columns(df)
 
+    df["FanDuel"] = pd.to_numeric(df["FanDuel"], errors="coerce")
+    df["DraftKings"] = pd.to_numeric(df["DraftKings"], errors="coerce")
+    df["BetMGM"] = pd.to_numeric(df["BetMGM"], errors="coerce")
+
     print("📥 Loading hitter stats...")
     hitter_data = get_hitter_stats()
 
     print("📥 Loading pitcher stats...")
     pitcher_data = get_pitcher_stats()
+
+    print("📥 Loading SportsGameOdds HR odds...")
+    hr_odds = build_sgo_hr_odds_lookup()
 
     filled_hitters = 0
     filled_pitchers = 0
@@ -126,8 +177,8 @@ def enrich_slate():
         if is_blank(player):
             continue
 
-        hitter = hitter_data.get(player)
-        pitcher_stats = pitcher_data.get(pitcher)
+        hitter = hitter_data.get(clean_name(player))
+        pitcher_stats = pitcher_data.get(clean_name(pitcher))
 
         if not pitcher_stats:
             pitcher_stats = FALLBACK_PITCHER_STATS
@@ -135,9 +186,16 @@ def enrich_slate():
         else:
             filled_pitchers += 1
 
+        pitcher_hand = pitcher_stats.get("Hand", "R")
+        pitcher_weak_side = choose_pitcher_weak_side(pitcher_stats)
+        pitcher_weak_bucket = estimate_pitcher_hr_spot_weakness(pitcher_stats)
+
         if hitter:
             hitter_hand = hitter.get("Hand", "R")
-            pitcher_hand = pitcher_stats.get("Hand", "R")
+
+            safe_set(df, idx, "BatterHand", hitter_hand)
+            safe_set(df, idx, "PitcherHRWeakSide", pitcher_weak_side)
+            safe_set(df, idx, "PitcherHRSpotWeakness", pitcher_weak_bucket)
 
             safe_set(df, idx, "ISO", choose_hitter_iso(hitter, pitcher_hand))
             safe_set(df, idx, "Pitcher_HR9", choose_pitcher_hr9(pitcher_stats, hitter_hand))
@@ -152,14 +210,23 @@ def enrich_slate():
 
             filled_hitters += 1
 
+        else:
+            safe_set(df, idx, "PitcherHRWeakSide", pitcher_weak_side)
+            safe_set(df, idx, "PitcherHRSpotWeakness", pitcher_weak_bucket)
+            safe_set(df, idx, "PitcherVulnerability", calculate_pitcher_vulnerability(pitcher_stats))
+
         safe_set(df, idx, "ParkFactor", PARK_FACTORS.get(team, 1.00))
         safe_set(df, idx, "WindFactor", get_weather_factor_for_team(team))
         filled_weather += 1
 
-        odds = get_player_odds(player)
-        safe_set(df, idx, "FanDuel", odds["FanDuel"])
-        safe_set(df, idx, "DraftKings", odds["DraftKings"])
-        safe_set(df, idx, "BetMGM", odds["BetMGM"])
+        odds = hr_odds.get(clean_name(player), {})
+        fd = odds.get("FanDuel")
+        dk = odds.get("DraftKings")
+        mgm = odds.get("BetMGM")
+
+        safe_set(df, idx, "FanDuel", float(str(fd).replace("+", "")) if fd else None)
+        safe_set(df, idx, "DraftKings", float(str(dk).replace("+", "")) if dk else None)
+        safe_set(df, idx, "BetMGM", float(str(mgm).replace("+", "")) if mgm else None)
         filled_odds += 1
 
     df.to_csv(file_path, index=False)

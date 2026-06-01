@@ -99,41 +99,135 @@ def is_blank(value):
     return pd.isna(value) or str(value).strip() == ""
 
 
-def lineup_spot_boost(lineup_spot):
+def safe_float(value, default=0):
+    try:
+        if pd.isna(value) or str(value).strip() == "":
+            return default
+        return float(value)
+    except Exception:
+        return default
+
+
+def safe_str(value, default=""):
+    try:
+        if pd.isna(value):
+            return default
+        return str(value).strip()
+    except Exception:
+        return default
+
+
+def get_lineup_bucket(lineup_spot):
+    spot = int(safe_float(lineup_spot, 0))
+
+    if spot in [1, 2, 3]:
+        return "1-3"
+    if spot in [4, 5, 6]:
+        return "4-6"
+    if spot in [7, 8, 9]:
+        return "7-9"
+
+    return ""
+
+
+def lineup_spot_boost(lineup_spot, lineup_source=""):
+    """
+    Confirmed lineup spots matter.
+    Active roster should NOT get boosted because it is not a real lineup.
+    """
+
+    source = safe_str(lineup_source).lower()
+
+    if source in ["active_roster", "power_roster"]:
+        return 1.00
+
+    spot = int(safe_float(lineup_spot, 0))
+
     boosts = {
-        1: 1.08,
-        2: 1.12,
-        3: 1.18,
-        4: 1.22,
-        5: 1.14,
-        6: 1.05,
+        1: 1.12,
+        2: 1.15,
+        3: 1.20,
+        4: 1.18,
+        5: 1.10,
+        6: 1.03,
         7: 0.96,
-        8: 0.91,
+        8: 0.92,
         9: 0.88,
     }
 
-    try:
-        spot = int(float(lineup_spot))
-        return boosts.get(spot, 1.00)
-    except Exception:
-        return 1.00
+    return boosts.get(spot, 1.00)
+
+
+def pitcher_lineup_weakness_bonus(row):
+    """
+    Adds score when the batter's lineup bucket matches where the pitcher
+    gives up the most HRs.
+
+    Add this column to sample_slate.csv when available:
+    PitcherHRSpotWeakness
+
+    Example values:
+    1-3
+    4-6
+    7-9
+    """
+
+    hitter_bucket = get_lineup_bucket(row.get("LineupSpot", ""))
+    pitcher_bucket = safe_str(row.get("PitcherHRSpotWeakness", "")).replace(" ", "")
+
+    if not hitter_bucket or not pitcher_bucket:
+        return 0
+
+    if hitter_bucket == pitcher_bucket:
+        return 5
+
+    return 0
+
+def pitcher_lineup_weak_spot_score(row):
+    hitter_bucket = get_lineup_bucket(row.get("LineupSpot", ""))
+    pitcher_bucket = safe_str(row.get("PitcherHRSpotWeakness", "")).replace(" ", "")
+
+    if not hitter_bucket or not pitcher_bucket:
+        return 0
+
+    if hitter_bucket == pitcher_bucket:
+        return 10
+
+    return 0
+
+
+def pitcher_handedness_weakness_bonus(row):
+    """
+    Adds score when pitcher gives up HRs to this batter's handedness.
+
+    Add these columns to sample_slate.csv when available:
+    BatterHand
+    PitcherHRWeakSide
+
+    Example:
+    BatterHand = L
+    PitcherHRWeakSide = L
+    """
+
+    batter_hand = safe_str(row.get("BatterHand", "")).upper()
+    weak_side = safe_str(row.get("PitcherHRWeakSide", "")).upper()
+
+    if not batter_hand or not weak_side:
+        return 0
+
+    if batter_hand == weak_side:
+        return 4
+
+    if batter_hand == "S":
+        return 2
+
+    return 0
 
 
 def pitcher_weakness_score(row):
-    try:
-        hr9 = float(row.get("Pitcher_HR9", 1.0) or 1.0)
-    except Exception:
-        hr9 = 1.0
-
-    try:
-        vulnerability = float(row.get("PitcherVulnerability", 45) or 45)
-    except Exception:
-        vulnerability = 45
-
-    try:
-        matchup = float(row.get("Matchup", 0.5) or 0.5)
-    except Exception:
-        matchup = 0.5
+    hr9 = safe_float(row.get("Pitcher_HR9", 1.0), 1.0)
+    vulnerability = safe_float(row.get("PitcherVulnerability", 45), 45)
+    matchup = safe_float(row.get("Matchup", 0.5), 0.5)
 
     score = 0
 
@@ -162,6 +256,9 @@ def pitcher_weakness_score(row):
     elif matchup >= 0.55:
         score += 1
 
+    score += pitcher_lineup_weakness_bonus(row)
+    score += pitcher_handedness_weakness_bonus(row)
+
     return min(score, 10)
 
 
@@ -185,7 +282,7 @@ def calculate_power_score(
     return round(score, 2)
 
 
-def calibrate_probability(raw_model_prob, power_score, lineup_boost):
+def calibrate_probability(raw_model_prob, power_score, lineup_boost, pitcher_score):
     model_prob = raw_model_prob
 
     if power_score >= 115:
@@ -201,6 +298,15 @@ def calibrate_probability(raw_model_prob, power_score, lineup_boost):
 
     model_prob *= lineup_boost
 
+    if pitcher_score >= 12:
+        model_prob *= 1.15
+    elif pitcher_score >= 9:
+        model_prob *= 1.12
+    elif pitcher_score >= 6:
+        model_prob *= 1.08
+    elif pitcher_score >= 4:
+        model_prob *= 1.04
+
     return min(max(model_prob, 0.01), 0.42)
 
 
@@ -211,7 +317,8 @@ def calculate_confidence(
     recent_hr_rate,
     hard_hit,
     power_score,
-    lineup_boost
+    lineup_boost,
+    pitcher_score
 ):
     confidence = (
         (model_prob * 75)
@@ -220,7 +327,8 @@ def calculate_confidence(
         + (recent_hr_rate * 55)
         + (hard_hit * 0.12)
         + (power_score * 0.12)
-        + ((lineup_boost - 1) * 80)
+        + ((lineup_boost - 1) * 95)
+        + (pitcher_score * 1.15)
     )
 
     return min(max(round(confidence), 0), 99)
@@ -371,6 +479,9 @@ def run():
     print("Confidence >= 63")
     print("Player appears in Top 3 Edge AND Top 4 Model Prob")
     print("Only strongest overlap player per team becomes YES")
+    print("Confirmed lineup spots receive boost")
+    print("Active roster lineups receive NO lineup boost")
+    print("Pitcher weak spots by lineup bucket and handedness included")
 
     file_path = os.path.join(
         os.path.dirname(__file__),
@@ -401,22 +512,22 @@ def run():
             "Matchup",
         ]
 
-        if any(is_blank(row[col]) for col in required):
+        if any(col not in row or is_blank(row[col]) for col in required):
             continue
 
         try:
             features = {
-                "ISO": float(row["ISO"]),
-                "Pitcher_HR9": float(row["Pitcher_HR9"]),
-                "HardHit": float(row["HardHit"]),
-                "FlyBall": float(row["FlyBall"]),
-                "BarrelRate": float(row["BarrelRate"]),
-                "ExitVelocity": float(row["ExitVelocity"]),
-                "LaunchAngle": float(row["LaunchAngle"]),
-                "RecentHRRate": float(row["RecentHRRate"]),
-                "ParkFactor": float(row["ParkFactor"]),
-                "WindFactor": float(row["WindFactor"]),
-                "Matchup": float(row["Matchup"]),
+                "ISO": safe_float(row["ISO"]),
+                "Pitcher_HR9": safe_float(row["Pitcher_HR9"]),
+                "HardHit": safe_float(row["HardHit"]),
+                "FlyBall": safe_float(row["FlyBall"]),
+                "BarrelRate": safe_float(row["BarrelRate"]),
+                "ExitVelocity": safe_float(row["ExitVelocity"]),
+                "LaunchAngle": safe_float(row["LaunchAngle"]),
+                "RecentHRRate": safe_float(row["RecentHRRate"]),
+                "ParkFactor": safe_float(row["ParkFactor"]),
+                "WindFactor": safe_float(row["WindFactor"]),
+                "Matchup": safe_float(row["Matchup"]),
             }
 
             feature_vector = [[
@@ -446,24 +557,21 @@ def run():
                 features["RecentHRRate"],
             )
 
-            lineup_boost = lineup_spot_boost(row.get("LineupSpot", 0))
-
-            model_prob = calibrate_probability(
-                raw_model_prob,
-                power_score,
-                lineup_boost
+            lineup_boost = lineup_spot_boost(
+                row.get("LineupSpot", 0),
+                row.get("LineupSource", "")
             )
 
             pitcher_score = pitcher_weakness_score(row)
 
-            if pitcher_score >= 8:
-                model_prob *= 1.12
-            elif pitcher_score >= 6:
-                model_prob *= 1.08
-            elif pitcher_score >= 4:
-                model_prob *= 1.04
+            pitcher_lineup_score = pitcher_lineup_weak_spot_score(row)
 
-            model_prob = min(max(model_prob, 0.01), 0.42)
+            model_prob = calibrate_probability(
+                raw_model_prob,
+                power_score,
+                lineup_boost,
+                pitcher_score
+            )
 
         except Exception as e:
             print(f"⚠️ Failed processing {row.get('Player', 'Unknown')}")
@@ -515,11 +623,9 @@ def run():
             recent_hr_rate,
             hard_hit,
             power_score,
-            lineup_boost
+            lineup_boost,
+            pitcher_score
         )
-
-        confidence += pitcher_score
-        confidence = min(max(round(confidence), 0), 99)
 
         player_bonus = get_player_bonus(row["Player"])
 
@@ -544,6 +650,8 @@ def run():
             "snapshot": os.getenv("MODEL_SNAPSHOT_LABEL", "MANUAL"),
             "game": row["Game"],
             "lineup_spot": row.get("LineupSpot", ""),
+            "lineup_source": row.get("LineupSource", ""),
+            "lineup_bucket": get_lineup_bucket(row.get("LineupSpot", "")),
             "player": row["Player"],
             "player_id": player_id,
             "player_headshot": headshot_url(player_id),
@@ -552,6 +660,10 @@ def run():
             "team_abbr": team_abbr(team),
             "pitcher": row["Pitcher"],
             "pitcher_weakness_score": pitcher_score,
+            "pitcher_lineup_weak_spot": pitcher_lineup_score,
+            "pitcher_hr_spot_weakness": row.get("PitcherHRSpotWeakness", ""),
+            "pitcher_hr_weak_side": row.get("PitcherHRWeakSide", ""),
+            "batter_hand": row.get("BatterHand", ""),
             "model_prob": round(float(model_prob), 4),
             "raw_model_prob": round(float(raw_model_prob), 4),
             "power_score": power_score,

@@ -243,7 +243,7 @@ def get_active_roster_lineup(team_id, team_name):
             "spot": idx + 1,
             "player": hitter["player"],
             "player_id": hitter["player_id"],
-            "source": "active_roster",
+            "source": "power_roster",
         })
 
     return lineup

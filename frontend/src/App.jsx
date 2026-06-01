@@ -202,6 +202,8 @@ function PlayerCard({ pick, index }) {
           tone={Number(pick.best_edge) >= 0 ? "positive" : "negative"}
         />
         <Metric label="Confidence" value={pick.confidence ?? "-"} />
+        <Metric label="Pitcher Weakness" value={`🔥 ${pick.pitcher_weakness_score ?? 0}/10`} />
+        <Metric label="Pitcher Spot Match" value={`🎯 ${pick.pitcher_lineup_weak_spot ?? 0}/10`} />
         <Metric label="HR Score" value={hrScore(pick)} />
         <Metric label="Raw Prob" value={percent(pick.raw_model_prob)} />
         <Metric label="Power Score" value={pick.power_score ?? "-"} />
@@ -413,6 +415,28 @@ function YesPlaysSection({ yesPicks }) {
   );
 }
 
+
+function SmashSpotSection({ smashSpotPicks }) {
+  return (
+    <section className="team-showcase-section">
+      <div className="page-title">
+        <h2>🔥 SMASH SPOT PLAYS 🔥</h2>
+        <p>YES plays with 10/10 Pitcher Weakness and 10/10 Pitcher Spot Match</p>
+      </div>
+
+      {smashSpotPicks.length === 0 ? (
+        <div className="empty-state">No Smash Spot plays found yet.</div>
+      ) : (
+        <div className="top3-grid">
+          {smashSpotPicks.map((pick, index) => (
+            <PlayerCard key={`smash-${pick.player}-${index}`} pick={pick} index={index} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function ResultsCenter() {
   const [rows, setRows] = useState([]);
 
@@ -502,12 +526,28 @@ export default function App() {
       const tierDiff = tierScore(b) - tierScore(a);
       if (tierDiff !== 0) return tierDiff;
 
+      const smashDiff =
+        Number(b.pitcher_weakness_score || 0) +
+        Number(b.pitcher_lineup_weak_spot || 0) -
+        (Number(a.pitcher_weakness_score || 0) +
+          Number(a.pitcher_lineup_weak_spot || 0));
+
+      if (smashDiff !== 0) return smashDiff;
+
       const edgeDiff = Number(b.best_edge || 0) - Number(a.best_edge || 0);
       if (edgeDiff !== 0) return edgeDiff;
 
       return Number(b.confidence || 0) - Number(a.confidence || 0);
     });
 }, [validPicks]);
+
+const smashSpotPicks = useMemo(() => {
+  return yesPicks.filter(
+    (pick) =>
+      Number(pick.pitcher_weakness_score || 0) >= 10 &&
+      Number(pick.pitcher_lineup_weak_spot || 0) >= 10
+  );
+}, [yesPicks]);
 
   const matchupGroups = useMemo(() => {
     const grouped = {};
@@ -639,6 +679,10 @@ export default function App() {
             🏠 Dashboard
           </button>
 
+          <button className={activeTab === "smash" ? "active" : ""} onClick={() => switchTab("smash")}>
+             🔥 Smash Spot
+          </button>
+          
           <button className={activeTab === "yes" ? "active" : ""} onClick={() => switchTab("yes")}>
             🔥 YES Plays
           </button>
@@ -717,6 +761,7 @@ export default function App() {
             <section className="stats-grid">
               <StatCard icon="💎" label="Total Graded Plays" value={validPicks.length} />
               <StatCard icon="🔥" label="YES Plays" value={yesPicks.length} />
+              <StatCard icon="💥" label="Smash Spots" value={smashSpotPicks.length} />
               <StatCard icon="📈" label="Avg Edge" value={avgEdge} />
               <StatCard icon="👑" label="Top Edge" value={topEdge} />
               <StatCard icon="💰" label="Total Stake" value={`${totalStake.toFixed(1)}u`} />
@@ -759,8 +804,11 @@ export default function App() {
           </div>
         )}
 
-        {activeTab !== "health" && activeTab !== "yes" && activeTab !== "results" && (
-          <ModelPlayOfDay pick={modelPlay} />
+        {activeTab !== "health" &&
+          activeTab !== "yes" &&
+          activeTab !== "results" &&
+          activeTab !== "smash" && (
+            <ModelPlayOfDay pick={modelPlay} />
         )}
 
         {activeTab === "health" ? (
@@ -769,6 +817,8 @@ export default function App() {
           <div className="empty-state">Loading slate...</div>
         ) : validPicks.length === 0 ? (
           <div className="empty-state">No completed player rows yet. Run stat enrichment and the model.</div>
+        ) : activeTab === "smash" ? (
+          <SmashSpotSection smashSpotPicks={smashSpotPicks} />
         ) : activeTab === "yes" ? (
           <YesPlaysSection yesPicks={yesPicks} />
         ) : activeTab === "results" ? (
