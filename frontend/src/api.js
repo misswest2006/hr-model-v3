@@ -1,8 +1,16 @@
 import axios from "axios";
 
+const LOCAL_API = "http://localhost:8000";
+const LIVE_API = "https://bread-break-public-vhs.trycloudflare.com";
+
 const API_BASE =
   import.meta.env.VITE_API_BASE ||
-  "https://bread-break-public-vhs.trycloudflare.com";
+  (window.location.hostname === "localhost" ||
+  window.location.hostname === "127.0.0.1"
+    ? LOCAL_API
+    : LIVE_API);
+
+console.log("API BASE:", API_BASE);
 
 export const fetchSlate = async () => {
   const res = await axios.get(`${API_BASE}/api/slate`);
