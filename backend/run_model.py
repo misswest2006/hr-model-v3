@@ -249,6 +249,27 @@ def assign_tier(row):
 
 
 def assign_play(row):
+    """
+    V3.11 OFFICIAL CARD FILTER
+
+    Goal:
+    - Keep the official YES card clean.
+    - Remove negative-edge YES plays.
+    - Move good-but-not-official profiles to POWER_BAT or VALUE_LEAN.
+    - Protect against weak lineup spots that Auto Tuner showed underperforming.
+
+    Official YES requires:
+    - Odds available
+    - Positive edge
+    - Confidence >= 88
+    - HRScore >= 87
+    - DecisionScore >= 85
+
+    Extra protection:
+    - Lineup spot 0 = missing lineup, downgrade unless extreme edge.
+    - Lineup spot 2 = downgrade unless truly elite.
+    """
+
     confidence = safe_num(row.get("Confidence"))
     edge = safe_num(row.get("Edge"), -999)
     hr_score = safe_num(row.get("HRScore"))
@@ -260,93 +281,79 @@ def assign_play(row):
     if not has_odds:
         return "NO_ODDS"
 
-    # V3.10 extreme edge override
-    if (
-        edge >= 0.15
-        and confidence >= 80
-        and hr_score >= 80
-        and decision >= 80
-    ):
-        return "YES"
-
-    if lineup_spot == 0 and edge < 0.12:
-        if edge > 0 and confidence >= 78:
-            return "VALUE_LEAN"
-        return "PASS"
-
-    if lineup_spot == 2 and edge < 0.10:
-        if confidence >= 88 and hr_score >= 90 and edge > 0:
+    # Never allow negative-edge official YES plays.
+    if edge <= 0:
+        if confidence >= 90 and hr_score >= 90 and decision >= 88:
             return "POWER_BAT"
-        if edge > 0 and confidence >= 78:
+        return "PASS"
+
+    # Missing lineup spot protection.
+    if lineup_spot == 0:
+        if edge >= 0.15 and confidence >= 84 and hr_score >= 84 and decision >= 84:
+            return "VALUE_LEAN"
+        if edge >= 0.08 and confidence >= 88 and hr_score >= 88:
             return "VALUE_LEAN"
         return "PASS"
 
-    if (
-        confidence >= 95
-        and hr_score >= 95
-        and decision >= 95
-        and smash >= 95
-        and edge >= -0.005
-    ):
-        return "YES"
+    # Lineup spot 2 has been weak in Auto Tuner. Require elite profile.
+    if lineup_spot == 2:
+        if edge >= 0.12 and confidence >= 90 and hr_score >= 92 and decision >= 90:
+            return "YES"
+        if edge >= 0.06 and confidence >= 88 and hr_score >= 90:
+            return "POWER_BAT"
+        if edge >= 0.03 and confidence >= 82:
+            return "VALUE_LEAN"
+        return "PASS"
 
+    # V3.11 official YES filter.
     if (
-        confidence >= 92
-        and hr_score >= 95
-        and decision >= 95
+        confidence >= 88
         and edge > 0
+        and hr_score >= 87
+        and decision >= 85
     ):
-        return "YES"
+        # Extreme edge override.
+        if edge >= 0.15 and confidence >= 80 and hr_score >= 80 and decision >= 80:
+            return "YES"
 
-    if (
-        edge >= 0.10
-        and confidence >= 84
-        and hr_score >= 84
-        and decision >= 84
-    ):
-        return "YES"
+        # Clean official card.
+        if edge >= 0.10:
+            return "YES"
 
-    if (
-        edge >= 0.05
-        and edge < 0.10
-        and confidence >= 90
-        and hr_score >= 88
-        and decision >= 90
-    ):
-        return "YES"
+        if edge >= 0.05 and confidence >= 88 and hr_score >= 88 and decision >= 86:
+            return "YES"
 
-    if (
-        edge >= 0.03
-        and edge < 0.05
-        and confidence >= 88
-        and hr_score >= 88
-        and decision >= 88
-    ):
-        return "YES"
+        if edge >= 0.03 and confidence >= 90 and hr_score >= 90 and decision >= 88:
+            return "YES"
 
-    if confidence >= 86 and hr_score >= 88:
+        # Very elite profile with small positive edge.
+        if confidence >= 95 and hr_score >= 95 and decision >= 95 and smash >= 94:
+            return "YES"
+
+    # Good power profile but not official-card clean.
+    if confidence >= 86 and hr_score >= 88 and decision >= 84:
         return "POWER_BAT"
 
+    # Positive edge but missing elite HR signals.
     if edge > 0 and confidence >= 78:
         return "VALUE_LEAN"
 
     return "PASS"
 
-
 def assign_display_labels(df):
     play_map = {
-        "YES": "YES 🔥",
-        "POWER_BAT": "POWER BAT 💣",
-        "VALUE_LEAN": "VALUE LEAN 👀",
+        "YES": "YES ðŸ”¥",
+        "POWER_BAT": "POWER BAT ðŸ’£",
+        "VALUE_LEAN": "VALUE LEAN ðŸ‘€",
         "NO_ODDS": "NO ODDS",
         "PASS": "PASS",
     }
 
     tier_map = {
-        "GOD_TIER": "GOD TIER 👑",
-        "ELITE": "ELITE 🔥",
-        "STRONG": "STRONG 💣",
-        "WATCH": "WATCH 👀",
+        "GOD_TIER": "GOD TIER ðŸ‘‘",
+        "ELITE": "ELITE ðŸ”¥",
+        "STRONG": "STRONG ðŸ’£",
+        "WATCH": "WATCH ðŸ‘€",
         "LOW": "LOW",
     }
 
@@ -364,30 +371,32 @@ def assign_reason(row):
     confidence = safe_num(row.get("Confidence"))
     edge = safe_num(row.get("Edge"))
     hr_score = safe_num(row.get("HRScore"))
+    decision = safe_num(row.get("DecisionScore"))
     lineup_spot = safe_num(row.get("LineupSpot"))
 
     if play_code == "YES":
         if edge >= 0.15:
-            return "V3.10 extreme edge official play"
-        if edge < 0:
-            return "Elite HR profile overrides tiny negative edge"
+            return "V3.11 extreme edge official play"
         if edge >= 0.10:
-            return "High-edge official play"
+            return "V3.11 high-edge official play"
         if edge >= 0.05:
-            return "Protected 5-10 edge official play"
+            return "V3.11 clean official card: positive edge + strong HR profile"
         if edge >= 0.03:
-            return "Positive low-edge official play"
-        return "Strong HR profile with playable edge"
+            return "V3.11 elite profile with low positive edge"
+        return "V3.11 official play"
+
+    if edge <= 0 and play_code in ["PASS", "POWER_BAT"]:
+        return "V3.11 filter removed negative-edge official play"
 
     if lineup_spot == 0 and play_code in ["PASS", "VALUE_LEAN"]:
-        return "Lineup spot missing. V3.10 downgrade applied."
+        return "Lineup spot missing. V3.11 downgrade applied."
 
     if lineup_spot == 2 and play_code in ["PASS", "VALUE_LEAN", "POWER_BAT"]:
-        return "Lineup spot 2 underperformed in tuner. V3.10 protection applied."
+        return "Lineup spot 2 underperformed in tuner. V3.11 protection applied."
 
     if play_code == "POWER_BAT":
         if confidence >= 90 and hr_score >= 90:
-            return "Elite power bat but edge is too negative"
+            return "Power bat profile but failed official YES edge/filter threshold"
         return "Power bat profile but not enough official-card edge"
 
     if play_code == "VALUE_LEAN":
@@ -397,10 +406,12 @@ def assign_reason(row):
         return "No sportsbook odds available"
 
     if confidence >= 90 and hr_score >= 90:
-        return "Strong profile but failed V3.10 official-card threshold"
+        return "Strong profile but failed V3.11 official-card threshold"
+
+    if edge > 0 and decision < 85:
+        return "Positive edge but decision score below official-card threshold"
 
     return "Not enough confirmed HR signals"
-
 
 def assign_stake(row):
     play_code = str(row.get("PlayCode", row.get("Play", "")))
@@ -487,7 +498,7 @@ def main():
     no_odds_rows = int((~df["HasOdds"].astype(bool)).sum())
 
     print()
-    print("MODEL COMPLETE - V3.10 EXTREME EDGE OVERRIDE")
+    print("MODEL COMPLETE - V3.11 OFFICIAL CARD FILTER")
     print(f"Saved results to: {OUTPUT_FILE}")
     print()
     print(f"Odds rows: {odds_rows}")
