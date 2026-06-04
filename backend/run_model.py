@@ -1,719 +1,529 @@
 import os
 import pandas as pd
-import joblib
+import numpy as np
 
-from core.odds import implied_prob
-from save_results import save_results
-from player_adjustments import get_player_bonus
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(BASE_DIR, "data")
 
-
-FEATURES = [
-    "ISO",
-    "Pitcher_HR9",
-    "HardHit",
-    "FlyBall",
-    "BarrelRate",
-    "ExitVelocity",
-    "LaunchAngle",
-    "RecentHRRate",
-    "ParkFactor",
-    "WindFactor",
-    "Matchup",
-]
+INPUT_FILE = os.path.join(DATA_DIR, "today_slate_enriched.csv")
+OUTPUT_FILE = os.path.join(DATA_DIR, "hr_model_results.csv")
 
 
-MODEL_PATH = os.path.join(
-    os.path.dirname(__file__),
-    "..",
-    "models",
-    "hr_model.pkl"
-)
-
-trained_model = joblib.load(MODEL_PATH)
-
-
-TEAM_ABBR = {
-    "Arizona Diamondbacks": "ari",
-    "Atlanta Braves": "atl",
-    "Baltimore Orioles": "bal",
-    "Boston Red Sox": "bos",
-    "Chicago Cubs": "chc",
-    "Chicago White Sox": "chw",
-    "Cincinnati Reds": "cin",
-    "Cleveland Guardians": "cle",
-    "Colorado Rockies": "col",
-    "Detroit Tigers": "det",
-    "Houston Astros": "hou",
-    "Kansas City Royals": "kc",
-    "Los Angeles Angels": "laa",
-    "Los Angeles Dodgers": "lad",
-    "Miami Marlins": "mia",
-    "Milwaukee Brewers": "mil",
-    "Minnesota Twins": "min",
-    "New York Mets": "nym",
-    "New York Yankees": "nyy",
-    "Athletics": "ath",
-    "Oakland Athletics": "ath",
-    "Philadelphia Phillies": "phi",
-    "Pittsburgh Pirates": "pit",
-    "San Diego Padres": "sd",
-    "San Francisco Giants": "sf",
-    "Seattle Mariners": "sea",
-    "St. Louis Cardinals": "stl",
-    "Tampa Bay Rays": "tb",
-    "Texas Rangers": "tex",
-    "Toronto Blue Jays": "tor",
-    "Washington Nationals": "wsh",
-}
-
-
-def team_abbr(team):
-    return TEAM_ABBR.get(str(team).strip(), "")
-
-
-def headshot_url(player_id):
-    if not player_id or str(player_id).lower() in ["nan", "none", "<na>"]:
-        return ""
-
-    clean_id = str(player_id).replace(".0", "").strip()
-
-    return (
-        "https://img.mlbstatic.com/mlb-photos/image/upload/"
-        f"w_180,q_auto:best/v1/people/{clean_id}/headshot/67/current"
-    )
-
-
-def team_logo_url(team):
-    abbr = team_abbr(team)
-    if not abbr:
-        return ""
-    return f"https://a.espncdn.com/i/teamlogos/mlb/500/{abbr}.png"
-
-
-def format_odds(odds):
-    odds = int(float(odds))
-    return f"+{odds}" if odds > 0 else str(odds)
-
-
-def is_blank(value):
-    return pd.isna(value) or str(value).strip() == ""
-
-
-def safe_float(value, default=0):
+def safe_num(value, default=0.0):
     try:
-        if pd.isna(value) or str(value).strip() == "":
+        if value == "" or value is None:
+            return default
+        if pd.isna(value):
             return default
         return float(value)
     except Exception:
         return default
 
 
-def safe_str(value, default=""):
-    try:
-        if pd.isna(value):
-            return default
-        return str(value).strip()
-    except Exception:
-        return default
+def implied_probability(odds):
+    odds = safe_num(odds, 0)
+
+    if odds == 0:
+        return np.nan
+
+    if odds > 0:
+        return 100 / (odds + 100)
+
+    return abs(odds) / (abs(odds) + 100)
 
 
-def get_lineup_bucket(lineup_spot):
-    spot = int(safe_float(lineup_spot, 0))
-
-    if spot in [1, 2, 3]:
-        return "1-3"
-    if spot in [4, 5, 6]:
-        return "4-6"
-    if spot in [7, 8, 9]:
-        return "7-9"
-
-    return ""
-
-
-def lineup_spot_boost(lineup_spot, lineup_source=""):
-    """
-    Confirmed lineup spots matter.
-    Active roster should NOT get boosted because it is not a real lineup.
-    """
-
-    source = safe_str(lineup_source).lower()
-
-    if source in ["active_roster", "power_roster"]:
-        return 1.00
-
-    spot = int(safe_float(lineup_spot, 0))
-
-    boosts = {
-        1: 1.12,
-        2: 1.15,
-        3: 1.20,
-        4: 1.18,
-        5: 1.10,
-        6: 1.03,
-        7: 0.96,
-        8: 0.92,
-        9: 0.88,
+def best_odds(row):
+    books = {
+        "FanDuel": row.get("FanDuel"),
+        "DraftKings": row.get("DraftKings"),
+        "BetMGM": row.get("BetMGM"),
     }
 
-    return boosts.get(spot, 1.00)
+    clean = {}
+
+    for book, odds in books.items():
+        val = safe_num(odds, np.nan)
+        if not pd.isna(val) and val != 0:
+            clean[book] = val
+
+    if not clean:
+        return pd.Series(["NO_ODDS", np.nan, False])
+
+    best_book = max(clean, key=clean.get)
+    best_price = clean[best_book]
+
+    return pd.Series([best_book, best_price, True])
 
 
-def pitcher_lineup_weakness_bonus(row):
-    """
-    Adds score when the batter's lineup bucket matches where the pitcher
-    gives up the most HRs.
+def percentile_score(series):
+    series = pd.to_numeric(series, errors="coerce").fillna(0)
 
-    Add this column to sample_slate.csv when available:
-    PitcherHRSpotWeakness
+    if series.nunique() <= 1:
+        return pd.Series([50.0] * len(series), index=series.index)
 
-    Example values:
-    1-3
-    4-6
-    7-9
-    """
+    return (series.rank(pct=True) * 100).round(2)
 
-    hitter_bucket = get_lineup_bucket(row.get("LineupSpot", ""))
-    pitcher_bucket = safe_str(row.get("PitcherHRSpotWeakness", "")).replace(" ", "")
 
-    if not hitter_bucket or not pitcher_bucket:
-        return 0
+def lineup_adjustment(spot):
+    spot = safe_num(spot, 0)
 
-    if hitter_bucket == pitcher_bucket:
-        return 5
+    if spot == 0:
+        return -18
 
-    return 0
+    if spot == 2:
+        return -8
 
-def pitcher_lineup_weak_spot_score(row):
-    hitter_bucket = get_lineup_bucket(row.get("LineupSpot", ""))
-    pitcher_bucket = safe_str(row.get("PitcherHRSpotWeakness", "")).replace(" ", "")
-
-    if not hitter_bucket or not pitcher_bucket:
-        return 0
-
-    if hitter_bucket == pitcher_bucket:
+    if spot == 3:
         return 10
 
-    return 0
+    if spot == 4:
+        return 8
 
+    if spot == 5:
+        return 9
 
-def pitcher_handedness_weakness_bonus(row):
-    """
-    Adds score when pitcher gives up HRs to this batter's handedness.
-
-    Add these columns to sample_slate.csv when available:
-    BatterHand
-    PitcherHRWeakSide
-
-    Example:
-    BatterHand = L
-    PitcherHRWeakSide = L
-    """
-
-    batter_hand = safe_str(row.get("BatterHand", "")).upper()
-    weak_side = safe_str(row.get("PitcherHRWeakSide", "")).upper()
-
-    if not batter_hand or not weak_side:
-        return 0
-
-    if batter_hand == weak_side:
-        return 4
-
-    if batter_hand == "S":
+    if spot == 6:
         return 2
 
     return 0
 
 
-def pitcher_weakness_score(row):
-    hr9 = safe_float(row.get("Pitcher_HR9", 1.0), 1.0)
-    vulnerability = safe_float(row.get("PitcherVulnerability", 45), 45)
-    matchup = safe_float(row.get("Matchup", 0.5), 0.5)
+def calculate_raw_scores(df):
+    numeric_cols = [
+        "TruePowerIndex",
+        "ISO",
+        "HardHit",
+        "BarrelRate",
+        "RecentHRRate",
+        "Pitcher_HR9",
+        "PitcherVulnerability",
+        "PitcherHRWeaknessScore",
+        "PitcherLineupWeakSpot",
+        "ContactQualityScore",
+        "LaunchProfileScore",
+        "PulledAirScore",
+        "EnrichmentScore",
+        "LineupSpot",
+        "ParkFactor",
+        "WindFactor",
+        "Matchup",
+    ]
 
-    score = 0
+    for col in numeric_cols:
+        if col not in df.columns:
+            df[col] = 0
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
-    if hr9 >= 1.8:
-        score += 4
-    elif hr9 >= 1.5:
-        score += 3
-    elif hr9 >= 1.25:
-        score += 2
-    elif hr9 >= 1.0:
-        score += 1
+    df["LineupSpotAdj"] = df["LineupSpot"].apply(lineup_adjustment)
 
-    if vulnerability >= 60:
-        score += 4
-    elif vulnerability >= 52:
-        score += 3
-    elif vulnerability >= 45:
-        score += 2
-    elif vulnerability >= 38:
-        score += 1
-
-    if matchup >= 0.75:
-        score += 3
-    elif matchup >= 0.65:
-        score += 2
-    elif matchup >= 0.55:
-        score += 1
-
-    score += pitcher_lineup_weakness_bonus(row)
-    score += pitcher_handedness_weakness_bonus(row)
-
-    return min(score, 10)
-
-
-def calculate_power_score(
-    iso,
-    hard_hit,
-    barrel_rate,
-    fly_ball,
-    exit_velocity,
-    recent_hr_rate
-):
-    score = (
-        (iso * 120)
-        + (hard_hit * 0.90)
-        + (barrel_rate * 3.20)
-        + (fly_ball * 0.55)
-        + (exit_velocity * 0.35)
-        + (recent_hr_rate * 120)
+    df["RawHRScore"] = (
+        df["TruePowerIndex"] * 0.34
+        + df["BarrelRate"] * 4.8
+        + df["HardHit"] * 1.15
+        + df["ISO"] * 250
+        + df["RecentHRRate"] * 180
+        + df["PitcherHRWeaknessScore"] * 6.5
+        + df["PitcherVulnerability"] * 0.85
+        + df["PitcherLineupWeakSpot"] * 4.5
+        + df["ParkFactor"] * 8
+        + df["WindFactor"] * 4
+        + df["Matchup"] * 10
+        + df["LineupSpotAdj"]
     )
 
-    return round(score, 2)
-
-
-def calibrate_probability(raw_model_prob, power_score, lineup_boost, pitcher_score):
-    model_prob = raw_model_prob
-
-    if power_score >= 115:
-        model_prob *= 2.45
-    elif power_score >= 100:
-        model_prob *= 2.20
-    elif power_score >= 85:
-        model_prob *= 1.85
-    elif power_score >= 70:
-        model_prob *= 1.50
-    elif power_score <= 55:
-        model_prob *= 0.75
-
-    model_prob *= lineup_boost
-
-    if pitcher_score >= 12:
-        model_prob *= 1.15
-    elif pitcher_score >= 9:
-        model_prob *= 1.12
-    elif pitcher_score >= 6:
-        model_prob *= 1.08
-    elif pitcher_score >= 4:
-        model_prob *= 1.04
-
-    return min(max(model_prob, 0.01), 0.42)
-
-
-def calculate_confidence(
-    model_prob,
-    edge,
-    barrel_rate,
-    recent_hr_rate,
-    hard_hit,
-    power_score,
-    lineup_boost,
-    pitcher_score
-):
-    confidence = (
-        (model_prob * 75)
-        + (edge * 120)
-        + (barrel_rate * 0.90)
-        + (recent_hr_rate * 55)
-        + (hard_hit * 0.12)
-        + (power_score * 0.12)
-        + ((lineup_boost - 1) * 95)
-        + (pitcher_score * 1.15)
+    df["RawDecisionScore"] = (
+        df["RawHRScore"] * 0.45
+        + df["EnrichmentScore"] * 0.25
+        + df["PitcherVulnerability"] * 0.20
+        + df["PitcherLineupWeakSpot"] * 1.2
+        + df["LineupSpotAdj"] * 1.4
     )
 
-    return min(max(round(confidence), 0), 99)
+    df["RawSmashScore"] = (
+        df["TruePowerIndex"] * 0.25
+        + df["RawHRScore"] * 0.35
+        + df["PitcherVulnerability"] * 0.75
+        + df["PitcherHRWeaknessScore"] * 5.5
+        + df["PitcherLineupWeakSpot"] * 5
+        + df["LineupSpotAdj"] * 1.2
+    )
+
+    return df
 
 
-def grade_play(confidence, barrel_rate, recent_hr_rate, power_score, edge):
-    if (
-        confidence >= 82
-        and barrel_rate >= 14
-        and recent_hr_rate >= 0.20
-        and power_score >= 105
-        and edge >= 0.10
-    ):
+def apply_percentile_scores(df):
+    df["HRScore"] = percentile_score(df["RawHRScore"])
+    df["DecisionScore"] = percentile_score(df["RawDecisionScore"])
+    df["SmashScore"] = percentile_score(df["RawSmashScore"])
+    df["PowerScore"] = df["TruePowerIndex"].round(2)
+
+    pitcher_pct = percentile_score(df["PitcherVulnerability"])
+
+    df["Confidence"] = (
+        df["HRScore"] * 0.40
+        + df["DecisionScore"] * 0.30
+        + df["SmashScore"] * 0.20
+        + pitcher_pct * 0.10
+    ).round(2)
+
+    return df
+
+
+def calculate_model_probability(df):
+    df["BestImpliedProb"] = df["BestOdds"].apply(implied_probability)
+
+    hr_pct = df["HRScore"] / 100
+    decision_pct = df["DecisionScore"] / 100
+    smash_pct = df["SmashScore"] / 100
+    pitcher_pct = percentile_score(df["PitcherVulnerability"]) / 100
+
+    raw_prob = (
+        0.055
+        + hr_pct * 0.055
+        + decision_pct * 0.040
+        + smash_pct * 0.035
+        + pitcher_pct * 0.020
+    )
+
+    df["RawModelProb"] = raw_prob.round(4)
+    df["ModelProb"] = raw_prob.clip(0.045, 0.235).round(4)
+
+    df["Edge"] = (
+        df["ModelProb"] - df["BestImpliedProb"]
+    ).round(6)
+
+    df["EVScore"] = np.where(
+        df["HasOdds"],
+        (df["Edge"] * 100).round(2),
+        0
+    )
+
+    df["Edge"] = pd.to_numeric(df["Edge"], errors="coerce").fillna(0)
+    df["EVScore"] = pd.to_numeric(df["EVScore"], errors="coerce").fillna(0)
+
+    return df
+
+
+def assign_grade(row):
+    confidence = safe_num(row.get("Confidence"))
+    hr_score = safe_num(row.get("HRScore"))
+    smash = safe_num(row.get("SmashScore"))
+
+    if confidence >= 96 and hr_score >= 96 and smash >= 94:
         return "A+"
 
-    if (
-        confidence >= 70
-        and barrel_rate >= 12
-        and recent_hr_rate >= 0.16
-        and power_score >= 90
-        and edge >= 0.05
-    ):
+    if confidence >= 90 and hr_score >= 90:
         return "A"
 
-    if (
-        confidence >= 55
-        and barrel_rate >= 8
-        and recent_hr_rate >= 0.10
-        and power_score >= 75
-        and edge >= 0.00
-    ):
+    if confidence >= 82:
+        return "B+"
+
+    if confidence >= 72:
         return "B"
 
-    if confidence >= 40:
+    if confidence >= 60:
         return "C"
 
     return "D"
 
 
-def base_yes_rule(model_prob, edge, confidence):
-    return (
-        model_prob >= 0.195
-        and edge >= 0.025
-        and confidence >= 63
-    )
+def assign_tier(row):
+    confidence = safe_num(row.get("Confidence"))
+    edge = safe_num(row.get("Edge"))
+    hr_score = safe_num(row.get("HRScore"))
+    smash = safe_num(row.get("SmashScore"))
+
+    if confidence >= 97 and hr_score >= 97 and smash >= 97 and edge > 0:
+        return "GOD_TIER"
+
+    if confidence >= 95 and hr_score >= 95 and smash >= 95:
+        return "ELITE"
+
+    if confidence >= 90 and hr_score >= 90:
+        return "STRONG"
+
+    if confidence >= 82:
+        return "WATCH"
+
+    return "LOW"
 
 
-def signal_tier(model_prob, edge, confidence):
-    if model_prob >= 0.21 and edge >= 0.04 and confidence >= 67:
-        return "TIER 1 💎"
+def assign_play(row):
+    confidence = safe_num(row.get("Confidence"))
+    edge = safe_num(row.get("Edge"), -999)
+    hr_score = safe_num(row.get("HRScore"))
+    decision = safe_num(row.get("DecisionScore"))
+    smash = safe_num(row.get("SmashScore"))
+    lineup_spot = safe_num(row.get("LineupSpot"))
+    has_odds = bool(row.get("HasOdds"))
 
-    if model_prob >= 0.195 and edge >= 0.025 and confidence >= 63:
-        return "TIER 2 🔥"
+    if not has_odds:
+        return "NO_ODDS"
 
-    return "WATCH"
+    # V3.10 extreme edge override
+    if (
+        edge >= 0.15
+        and confidence >= 80
+        and hr_score >= 80
+        and decision >= 80
+    ):
+        return "YES"
+
+    if lineup_spot == 0 and edge < 0.12:
+        if edge > 0 and confidence >= 78:
+            return "VALUE_LEAN"
+        return "PASS"
+
+    if lineup_spot == 2 and edge < 0.10:
+        if confidence >= 88 and hr_score >= 90 and edge > 0:
+            return "POWER_BAT"
+        if edge > 0 and confidence >= 78:
+            return "VALUE_LEAN"
+        return "PASS"
+
+    if (
+        confidence >= 95
+        and hr_score >= 95
+        and decision >= 95
+        and smash >= 95
+        and edge >= -0.005
+    ):
+        return "YES"
+
+    if (
+        confidence >= 92
+        and hr_score >= 95
+        and decision >= 95
+        and edge > 0
+    ):
+        return "YES"
+
+    if (
+        edge >= 0.10
+        and confidence >= 84
+        and hr_score >= 84
+        and decision >= 84
+    ):
+        return "YES"
+
+    if (
+        edge >= 0.05
+        and edge < 0.10
+        and confidence >= 90
+        and hr_score >= 88
+        and decision >= 90
+    ):
+        return "YES"
+
+    if (
+        edge >= 0.03
+        and edge < 0.05
+        and confidence >= 88
+        and hr_score >= 88
+        and decision >= 88
+    ):
+        return "YES"
+
+    if confidence >= 86 and hr_score >= 88:
+        return "POWER_BAT"
+
+    if edge > 0 and confidence >= 78:
+        return "VALUE_LEAN"
+
+    return "PASS"
 
 
-def stake_size(play, tier):
-    if play != "YES 🔥":
-        return 0
+def assign_display_labels(df):
+    play_map = {
+        "YES": "YES 🔥",
+        "POWER_BAT": "POWER BAT 💣",
+        "VALUE_LEAN": "VALUE LEAN 👀",
+        "NO_ODDS": "NO ODDS",
+        "PASS": "PASS",
+    }
 
-    if tier == "TIER 1 💎":
-        return 1.0
+    tier_map = {
+        "GOD_TIER": "GOD TIER 👑",
+        "ELITE": "ELITE 🔥",
+        "STRONG": "STRONG 💣",
+        "WATCH": "WATCH 👀",
+        "LOW": "LOW",
+    }
 
-    if tier == "TIER 2 🔥":
-        return 0.5
+    df["PlayCode"] = df["Play"]
+    df["TierCode"] = df["Tier"]
+
+    df["Play"] = df["PlayCode"].map(play_map).fillna(df["PlayCode"])
+    df["Tier"] = df["TierCode"].map(tier_map).fillna(df["TierCode"])
+
+    return df
+
+
+def assign_reason(row):
+    play_code = str(row.get("PlayCode", row.get("Play", "")))
+    confidence = safe_num(row.get("Confidence"))
+    edge = safe_num(row.get("Edge"))
+    hr_score = safe_num(row.get("HRScore"))
+    lineup_spot = safe_num(row.get("LineupSpot"))
+
+    if play_code == "YES":
+        if edge >= 0.15:
+            return "V3.10 extreme edge official play"
+        if edge < 0:
+            return "Elite HR profile overrides tiny negative edge"
+        if edge >= 0.10:
+            return "High-edge official play"
+        if edge >= 0.05:
+            return "Protected 5-10 edge official play"
+        if edge >= 0.03:
+            return "Positive low-edge official play"
+        return "Strong HR profile with playable edge"
+
+    if lineup_spot == 0 and play_code in ["PASS", "VALUE_LEAN"]:
+        return "Lineup spot missing. V3.10 downgrade applied."
+
+    if lineup_spot == 2 and play_code in ["PASS", "VALUE_LEAN", "POWER_BAT"]:
+        return "Lineup spot 2 underperformed in tuner. V3.10 protection applied."
+
+    if play_code == "POWER_BAT":
+        if confidence >= 90 and hr_score >= 90:
+            return "Elite power bat but edge is too negative"
+        return "Power bat profile but not enough official-card edge"
+
+    if play_code == "VALUE_LEAN":
+        return "Positive edge but not enough elite HR signals"
+
+    if play_code == "NO_ODDS":
+        return "No sportsbook odds available"
+
+    if confidence >= 90 and hr_score >= 90:
+        return "Strong profile but failed V3.10 official-card threshold"
+
+    return "Not enough confirmed HR signals"
+
+
+def assign_stake(row):
+    play_code = str(row.get("PlayCode", row.get("Play", "")))
+    confidence = safe_num(row.get("Confidence"))
+    edge = safe_num(row.get("Edge"))
+    hr_score = safe_num(row.get("HRScore"))
+    decision = safe_num(row.get("DecisionScore"))
+    smash = safe_num(row.get("SmashScore"))
+
+    if play_code == "YES":
+        if (
+            confidence >= 97
+            and hr_score >= 97
+            and decision >= 97
+            and smash >= 97
+            and edge >= 0.015
+        ):
+            return 0.50
+
+        return 0.25
+
+    if play_code == "POWER_BAT":
+        return 0.10
+
+    if play_code == "VALUE_LEAN":
+        return 0.10
 
     return 0
 
 
-def get_player_id(row):
-    player_id = row.get("player_id", "")
-    if pd.isna(player_id):
-        return ""
-    return str(player_id).replace(".0", "").strip()
+def add_rankings(df):
+    df["TopHRRank"] = df["HRScore"].rank(method="dense", ascending=False).astype(int)
+    df["TopEdgeRank"] = df["Edge"].rank(method="dense", ascending=False).astype(int)
+    df["TopProbRank"] = df["ModelProb"].rank(method="dense", ascending=False).astype(int)
+    df["TopSmashRank"] = df["SmashScore"].rank(method="dense", ascending=False).astype(int)
+    return df
 
 
-def add_team_overlap_yes(results):
-    df = pd.DataFrame(results)
+def add_frontend_aliases(df):
+    df["PitcherScore"] = df.get("PitcherHRWeaknessScore", 0)
+    df["PitcherLineupScore"] = df.get("PitcherLineupWeakSpot", 0)
+    df["SmashTier"] = df["Tier"]
+    return df
 
-    if df.empty:
-        return results
 
-    df["top_edge_rank"] = (
-        df.groupby("team")["best_edge"]
-        .rank(method="first", ascending=False)
-        .astype(int)
+def main():
+    print(f"Loading slate: {INPUT_FILE}")
+
+    if not os.path.exists(INPUT_FILE):
+        raise FileNotFoundError(f"Missing enriched slate: {INPUT_FILE}")
+
+    df = pd.read_csv(INPUT_FILE)
+
+    for col in ["FanDuel", "DraftKings", "BetMGM"]:
+        if col not in df.columns:
+            df[col] = np.nan
+
+    df[["BestBook", "BestOdds", "HasOdds"]] = df.apply(best_odds, axis=1)
+
+    df = calculate_raw_scores(df)
+    df = apply_percentile_scores(df)
+    df = calculate_model_probability(df)
+
+    df["Grade"] = df.apply(assign_grade, axis=1)
+    df["Tier"] = df.apply(assign_tier, axis=1)
+    df["Play"] = df.apply(assign_play, axis=1)
+
+    df = add_rankings(df)
+    df = assign_display_labels(df)
+
+    df["Reason"] = df.apply(assign_reason, axis=1)
+    df["Stake"] = df.apply(assign_stake, axis=1)
+
+    df = add_frontend_aliases(df)
+
+    df = df.sort_values(
+        by=["Confidence", "HRScore", "SmashScore", "Edge"],
+        ascending=[False, False, False, False]
     )
 
-    df["top_prob_rank"] = (
-        df.groupby("team")["model_prob"]
-        .rank(method="first", ascending=False)
-        .astype(int)
-    )
+    df.to_csv(OUTPUT_FILE, index=False, encoding="utf-8-sig")
 
-    df["is_top3_edge"] = df["top_edge_rank"] <= 3
-    df["is_top4_prob"] = df["top_prob_rank"] <= 4
+    odds_rows = int(df["HasOdds"].sum())
+    no_odds_rows = int((~df["HasOdds"].astype(bool)).sum())
 
-    df["overlap_candidate"] = (
-        df["is_top3_edge"]
-        & df["is_top4_prob"]
-        & df.apply(
-            lambda row: base_yes_rule(
-                float(row["model_prob"]),
-                float(row["best_edge"]),
-                int(row["confidence"])
-            ),
-            axis=1
-        )
-    )
+    print()
+    print("MODEL COMPLETE - V3.10 EXTREME EDGE OVERRIDE")
+    print(f"Saved results to: {OUTPUT_FILE}")
+    print()
+    print(f"Odds rows: {odds_rows}")
+    print(f"No odds rows: {no_odds_rows}")
+    print()
+    print("Play counts:")
+    print(df["PlayCode"].value_counts().to_string())
+    print()
+    print("Tier counts:")
+    print(df["TierCode"].value_counts().to_string())
+    print()
+    print("Stake summary:")
+    print(df.groupby("PlayCode")["Stake"].sum().to_string())
+    print()
+    print("Top HR Plays:")
 
-    df["play"] = "NO"
-    df["tier"] = "WATCH"
-    df["stake"] = 0.0
+    show_cols = [
+        "Player", "Team", "Pitcher", "LineupSpot",
+        "LineupSpotAdj",
+        "BestBook", "BestOdds", "HasOdds",
+        "PowerScore", "HRScore", "EVScore",
+        "ModelProb", "Edge", "Confidence",
+        "DecisionScore", "SmashScore",
+        "Grade", "TierCode", "PlayCode", "Reason", "Stake"
+    ]
 
-    for team, group in df.groupby("team"):
-        overlap = group[group["overlap_candidate"]].copy()
+    existing = [c for c in show_cols if c in df.columns]
 
-        if overlap.empty:
-            continue
+    print(df.head(30)[existing].to_string(index=False))
 
-        overlap = overlap.sort_values(
-            by=["best_edge", "model_prob", "confidence"],
-            ascending=[False, False, False]
-        )
-
-        best_idx = overlap.index[0]
-
-        model_prob = float(df.loc[best_idx, "model_prob"])
-        edge = float(df.loc[best_idx, "best_edge"])
-        confidence = int(df.loc[best_idx, "confidence"])
-
-        tier = signal_tier(model_prob, edge, confidence)
-
-        df.loc[best_idx, "play"] = "YES 🔥"
-        df.loc[best_idx, "tier"] = tier
-        df.loc[best_idx, "stake"] = stake_size("YES 🔥", tier)
-
-    return df.to_dict(orient="records")
+    return df.to_dict("records")
 
 
 def run():
-    print("🚀 SCRIPT LOADED")
-    print("🤖 TRAINED HR MODEL STARTED")
-    print("🔥 YES rule:")
-    print("ModelProb >= 19.5%")
-    print("Edge >= +2.5%")
-    print("Confidence >= 63")
-    print("Player appears in Top 3 Edge AND Top 4 Model Prob")
-    print("Only strongest overlap player per team becomes YES")
-    print("Confirmed lineup spots receive boost")
-    print("Active roster lineups receive NO lineup boost")
-    print("Pitcher weak spots by lineup bucket and handedness included")
-
-    file_path = os.path.join(
-        os.path.dirname(__file__),
-        "..",
-        "data",
-        "sample_slate.csv"
-    )
-
-    df = pd.read_csv(file_path)
-
-    books = ["FanDuel", "DraftKings", "BetMGM"]
-
-    results = []
-
-    for _, row in df.iterrows():
-        required = [
-            "Player",
-            "ISO",
-            "Pitcher_HR9",
-            "HardHit",
-            "FlyBall",
-            "BarrelRate",
-            "ExitVelocity",
-            "LaunchAngle",
-            "RecentHRRate",
-            "ParkFactor",
-            "WindFactor",
-            "Matchup",
-        ]
-
-        if any(col not in row or is_blank(row[col]) for col in required):
-            continue
-
-        try:
-            features = {
-                "ISO": safe_float(row["ISO"]),
-                "Pitcher_HR9": safe_float(row["Pitcher_HR9"]),
-                "HardHit": safe_float(row["HardHit"]),
-                "FlyBall": safe_float(row["FlyBall"]),
-                "BarrelRate": safe_float(row["BarrelRate"]),
-                "ExitVelocity": safe_float(row["ExitVelocity"]),
-                "LaunchAngle": safe_float(row["LaunchAngle"]),
-                "RecentHRRate": safe_float(row["RecentHRRate"]),
-                "ParkFactor": safe_float(row["ParkFactor"]),
-                "WindFactor": safe_float(row["WindFactor"]),
-                "Matchup": safe_float(row["Matchup"]),
-            }
-
-            feature_vector = [[
-                features["ISO"],
-                features["Pitcher_HR9"],
-                features["HardHit"],
-                features["FlyBall"],
-                features["BarrelRate"],
-                features["ExitVelocity"],
-                features["LaunchAngle"],
-                features["RecentHRRate"],
-                features["ParkFactor"],
-                features["WindFactor"],
-                features["Matchup"],
-            ]]
-
-            raw_model_prob = float(
-                trained_model.predict_proba(feature_vector)[0][1]
-            )
-
-            power_score = calculate_power_score(
-                features["ISO"],
-                features["HardHit"],
-                features["BarrelRate"],
-                features["FlyBall"],
-                features["ExitVelocity"],
-                features["RecentHRRate"],
-            )
-
-            lineup_boost = lineup_spot_boost(
-                row.get("LineupSpot", 0),
-                row.get("LineupSource", "")
-            )
-
-            pitcher_score = pitcher_weakness_score(row)
-
-            pitcher_lineup_score = pitcher_lineup_weak_spot_score(row)
-
-            model_prob = calibrate_probability(
-                raw_model_prob,
-                power_score,
-                lineup_boost,
-                pitcher_score
-            )
-
-        except Exception as e:
-            print(f"⚠️ Failed processing {row.get('Player', 'Unknown')}")
-            print(e)
-            continue
-
-        book_results = []
-
-        for book in books:
-            if book not in row or is_blank(row[book]):
-                continue
-
-            try:
-                odds = float(row[book])
-                implied = implied_prob(odds)
-                edge = model_prob - implied
-
-                book_results.append({
-                    "book": book,
-                    "odds": format_odds(odds),
-                    "implied_prob": round(float(implied), 4),
-                    "edge": round(float(edge), 4),
-                })
-
-            except Exception as e:
-                print(f"⚠️ Odds processing failed for {row['Player']} | {book}")
-                print(e)
-                continue
-
-        if not book_results:
-            continue
-
-        best_book = sorted(
-            book_results,
-            key=lambda x: x["edge"],
-            reverse=True
-        )[0]
-
-        edge = float(best_book["edge"])
-
-        barrel_rate = features["BarrelRate"]
-        recent_hr_rate = features["RecentHRRate"]
-        hard_hit = features["HardHit"]
-
-        confidence = calculate_confidence(
-            model_prob,
-            edge,
-            barrel_rate,
-            recent_hr_rate,
-            hard_hit,
-            power_score,
-            lineup_boost,
-            pitcher_score
-        )
-
-        player_bonus = get_player_bonus(row["Player"])
-
-        confidence += player_bonus
-        confidence = min(max(round(confidence), 0), 99)
-
-        grade = grade_play(
-            confidence,
-            barrel_rate,
-            recent_hr_rate,
-            power_score,
-            edge
-        )
-
-        player_id = get_player_id(row)
-        team = row["Team"]
-
-        results.append({
-            "date": row["Date"],
-            "game_time": row.get("GameTime", ""),
-            "game_time_et": row.get("GameTimeET", ""),
-            "snapshot": os.getenv("MODEL_SNAPSHOT_LABEL", "MANUAL"),
-            "game": row["Game"],
-            "lineup_spot": row.get("LineupSpot", ""),
-            "lineup_source": row.get("LineupSource", ""),
-            "lineup_bucket": get_lineup_bucket(row.get("LineupSpot", "")),
-            "player": row["Player"],
-            "player_id": player_id,
-            "player_headshot": headshot_url(player_id),
-            "team": team,
-            "team_logo": team_logo_url(team),
-            "team_abbr": team_abbr(team),
-            "pitcher": row["Pitcher"],
-            "pitcher_weakness_score": pitcher_score,
-            "pitcher_lineup_weak_spot": pitcher_lineup_score,
-            "pitcher_hr_spot_weakness": row.get("PitcherHRSpotWeakness", ""),
-            "pitcher_hr_weak_side": row.get("PitcherHRWeakSide", ""),
-            "batter_hand": row.get("BatterHand", ""),
-            "model_prob": round(float(model_prob), 4),
-            "raw_model_prob": round(float(raw_model_prob), 4),
-            "power_score": power_score,
-            "lineup_boost": round(float(lineup_boost), 2),
-            "best_book": best_book["book"],
-            "best_odds": best_book["odds"],
-            "best_edge": round(float(edge), 4),
-            "confidence": confidence,
-            "player_bonus": player_bonus,
-            "stake": 0,
-            "grade": grade,
-            "tier": "WATCH",
-            "top_edge_rank": 999,
-            "top_prob_rank": 999,
-            "is_top3_edge": False,
-            "is_top4_prob": False,
-            "overlap_candidate": False,
-            "play": "NO",
-            "all_books": book_results,
-        })
-
-    results = add_team_overlap_yes(results)
-
-    results = sorted(
-        results,
-        key=lambda x: (
-            x["play"] == "YES 🔥",
-            x["tier"] == "TIER 1 💎",
-            x["best_edge"],
-            x["confidence"],
-        ),
-        reverse=True
-    )
-
-    yes_count = sum(1 for r in results if r["play"] == "YES 🔥")
-
-    print("\n🔥 ALL TRAINED MODEL HR PLAYS 🔥\n")
-
-    if not results:
-        print("⚠️ No completed player rows found.")
-    else:
-        for r in results:
-            print(r)
-
-    print(f"\n🔥 YES PLAYS FOUND: {yes_count}\n")
-
-    save_results(results)
-
-    return results
+    return main()
 
 
 if __name__ == "__main__":
-    run()
+    main()

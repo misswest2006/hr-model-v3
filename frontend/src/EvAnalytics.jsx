@@ -14,11 +14,23 @@ export default function EvAnalytics() {
     return <div className="empty-state">Loading EV analytics...</div>;
   }
 
+  // ✅ Remove duplicate players
+  const uniquePlays = [
+    ...new Map(
+      (data.plays || []).map((p) => [
+        `${p.player}-${p.team}`,
+        p,
+      ])
+    ).values(),
+  ];
+
   return (
     <section className="team-showcase-section">
       <div className="page-title">
         <h2>💰 EV ANALYTICS</h2>
-        <p>Compare model probability against sportsbook implied probability.</p>
+        <p>
+          Compare model probability against sportsbook implied probability.
+        </p>
       </div>
 
       <div className="stats-grid">
@@ -39,7 +51,7 @@ export default function EvAnalytics() {
 
         <div className="stat-card">
           <span>Total YES Plays</span>
-          <strong>{data.total_yes_plays}</strong>
+          <strong>{uniquePlays.length}</strong>
         </div>
       </div>
 
@@ -52,18 +64,25 @@ export default function EvAnalytics() {
           <span>Implied Prob</span>
           <span>EV Edge</span>
           <span>Conf</span>
+           <span>Smash</span>
           <span>Result</span>
         </div>
 
-        {data.plays?.map((p, i) => (
-          <div className="results-row" key={`${p.player}-${i}`}>
+        {uniquePlays.map((p) => (
+          <div
+            className="results-row"
+            key={`${p.player}-${p.team}`}
+          >
             <span>{p.player}</span>
             <span>{p.team}</span>
-            <span>{p.book} {p.odds}</span>
+            <span>
+              {p.book} {p.odds}
+            </span>
             <span>{p.model_prob}%</span>
             <span>{p.implied_prob}%</span>
             <span>{p.ev_edge}%</span>
             <span>{p.confidence}</span>
+            <span>{Number(p.smash_score || 0) > 0 ? `${p.smash_score} ${p.smash_tier || ""}` : "-"}</span> 
             <span>{p.result}</span>
           </div>
         ))}

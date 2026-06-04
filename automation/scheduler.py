@@ -46,6 +46,7 @@ def has_snapshot_run_today(label):
 
 def run_snapshot(label):
     today = datetime.now().date()
+    label = label.upper().strip()
     key = f"{today}_{label}"
 
     if key in ran_today:
@@ -53,21 +54,30 @@ def run_snapshot(label):
 
     if has_snapshot_run_today(label):
         ran_today.add(key)
-        log(f"✅ {label} snapshot already exists today. Skipping.")
+        log(f"{label} snapshot already exists today. Skipping.")
         return
 
     ran_today.add(key)
 
-    log(f"🚀 Running {label} snapshot")
+    log(f"Running {label} snapshot")
 
-    run_command([
+    command = [
         "py",
-        str(ROOT / "automation" / "cron.py"),
-        "--snapshot",
-        label,
-    ])
+        "-c",
+        (
+            "import sys; "
+            "from pathlib import Path; "
+            f"root = Path(r'{ROOT}'); "
+            "sys.path.insert(0, str(root)); "
+            "sys.path.insert(0, str(root / 'automation')); "
+            "from automation.cron import full_model_refresh; "
+            f"full_model_refresh('{label}')"
+        )
+    ]
 
-    log(f"✅ Finished {label} snapshot")
+    run_command(command)
+
+    log(f"Finished {label} snapshot")
 
 
 def run_nightly_grade():
@@ -81,7 +91,7 @@ def run_nightly_grade():
 
     game_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
 
-    log(f"🌙 Running nightly grading for {game_date}")
+    log(f"Running nightly grading for {game_date}")
 
     run_command([
         "py",
@@ -90,7 +100,7 @@ def run_nightly_grade():
         game_date,
     ])
 
-    log("✅ Finished nightly grading")
+    log("Finished nightly grading")
 
 
 def get_first_game_time():
@@ -114,22 +124,20 @@ def get_first_game_time():
 
 
 def main():
-    log("⏰ HR Model Scheduler Started")
-    log("✅ MORNING run window: 9:00 AM")
-    log("✅ MORNING catch-up: runs after 9:00 AM if missed")
-    log("✅ ONE_HOUR run window: 1 hour before first pitch")
-    log("✅ LOCK run window: 15 minutes before first pitch")
-    log("✅ NIGHTLY GRADE window: 1:30 AM")
+    log("HR Model Scheduler Started")
+    log("MORNING run window: 9:00 AM")
+    log("MORNING catch-up: runs after 9:00 AM if missed")
+    log("ONE_HOUR run window: 1 hour before first pitch")
+    log("LOCK run window: 15 minutes before first pitch")
+    log("NIGHTLY GRADE window: 1:30 AM")
 
     while True:
         now = datetime.now()
         first_pitch = get_first_game_time()
 
-        # MORNING normal window: 9:00 - 9:05 AM
         if now.hour == 9 and now.minute < 5:
             run_snapshot("MORNING")
 
-        # MORNING catch-up: if scheduler starts after 9:05 and MORNING did not run
         if now.hour >= 9 and not has_snapshot_run_today("MORNING"):
             run_snapshot("MORNING")
 
@@ -137,19 +145,15 @@ def main():
             one_hour_time = first_pitch - timedelta(hours=1)
             lock_time = first_pitch - timedelta(minutes=15)
 
-            # ONE_HOUR run: 1 hour before first pitch
             if 0 <= (now - one_hour_time).total_seconds() < 300:
                 run_snapshot("ONE_HOUR")
 
-            # LOCK run: 15 minutes before first pitch
             if 0 <= (now - lock_time).total_seconds() < 300:
                 run_snapshot("LOCK")
 
-        # Nightly grade around 1:30 AM
         if now.hour == 1 and 30 <= now.minute < 35:
             run_nightly_grade()
 
-        # Reset memory after 3 AM
         if now.hour == 3 and now.minute < 5:
             ran_today.clear()
 

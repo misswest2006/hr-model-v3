@@ -1,9 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  fetchSlate,
-  fetchYesTracker,
-  fetchYesResults,
-} from "./api";
+import { fetchSlate, fetchYesTracker, fetchYesResults } from "./api";
 import "./App.css";
 import ModelHealth from "./ModelHealth";
 import ConfidenceAnalytics from "./ConfidenceAnalytics";
@@ -20,40 +16,6 @@ const SPORTSBOOKS = {
   FanDuel: { label: "FanDuel", logo: "/fanduel-logo.png" },
   DraftKings: { label: "DraftKings", logo: "/draftkings-logo.png" },
   BetMGM: { label: "BetMGM", logo: "/betmgm-logo.png" },
-};
-
-const TEAM_LOGO_FALLBACKS = {
-  "Arizona Diamondbacks": "https://a.espncdn.com/i/teamlogos/mlb/500/ari.png",
-  "Atlanta Braves": "https://a.espncdn.com/i/teamlogos/mlb/500/atl.png",
-  "Baltimore Orioles": "https://a.espncdn.com/i/teamlogos/mlb/500/bal.png",
-  "Boston Red Sox": "https://a.espncdn.com/i/teamlogos/mlb/500/bos.png",
-  "Chicago Cubs": "https://a.espncdn.com/i/teamlogos/mlb/500/chc.png",
-  "Chicago White Sox": "https://a.espncdn.com/i/teamlogos/mlb/500/chw.png",
-  "Cincinnati Reds": "https://a.espncdn.com/i/teamlogos/mlb/500/cin.png",
-  "Cleveland Guardians": "https://a.espncdn.com/i/teamlogos/mlb/500/cle.png",
-  "Colorado Rockies": "https://a.espncdn.com/i/teamlogos/mlb/500/col.png",
-  "Detroit Tigers": "https://a.espncdn.com/i/teamlogos/mlb/500/det.png",
-  "Houston Astros": "https://a.espncdn.com/i/teamlogos/mlb/500/hou.png",
-  "Kansas City Royals": "https://a.espncdn.com/i/teamlogos/mlb/500/kc.png",
-  "Los Angeles Angels": "https://a.espncdn.com/i/teamlogos/mlb/500/laa.png",
-  "Los Angeles Dodgers": "https://a.espncdn.com/i/teamlogos/mlb/500/lad.png",
-  "Miami Marlins": "https://a.espncdn.com/i/teamlogos/mlb/500/mia.png",
-  "Milwaukee Brewers": "https://a.espncdn.com/i/teamlogos/mlb/500/mil.png",
-  "Minnesota Twins": "https://a.espncdn.com/i/teamlogos/mlb/500/min.png",
-  "New York Mets": "https://a.espncdn.com/i/teamlogos/mlb/500/nym.png",
-  "New York Yankees": "https://a.espncdn.com/i/teamlogos/mlb/500/nyy.png",
-  Athletics: "https://a.espncdn.com/i/teamlogos/mlb/500/ath.png",
-  "Oakland Athletics": "https://a.espncdn.com/i/teamlogos/mlb/500/ath.png",
-  "Philadelphia Phillies": "https://a.espncdn.com/i/teamlogos/mlb/500/phi.png",
-  "Pittsburgh Pirates": "https://a.espncdn.com/i/teamlogos/mlb/500/pit.png",
-  "San Diego Padres": "https://a.espncdn.com/i/teamlogos/mlb/500/sd.png",
-  "San Francisco Giants": "https://a.espncdn.com/i/teamlogos/mlb/500/sf.png",
-  "Seattle Mariners": "https://a.espncdn.com/i/teamlogos/mlb/500/sea.png",
-  "St. Louis Cardinals": "https://a.espncdn.com/i/teamlogos/mlb/500/stl.png",
-  "Tampa Bay Rays": "https://a.espncdn.com/i/teamlogos/mlb/500/tb.png",
-  "Texas Rangers": "https://a.espncdn.com/i/teamlogos/mlb/500/tex.png",
-  "Toronto Blue Jays": "https://a.espncdn.com/i/teamlogos/mlb/500/tor.png",
-  "Washington Nationals": "https://a.espncdn.com/i/teamlogos/mlb/500/wsh.png",
 };
 
 function percent(value) {
@@ -91,15 +53,6 @@ function opponentFromGame(game, team) {
   return "";
 }
 
-function getTeamLogo(team, picks) {
-  const apiLogo = picks.find((pick) => pick.team === team && pick.team_logo)?.team_logo;
-  return apiLogo || TEAM_LOGO_FALLBACKS[team] || "";
-}
-
-function getTeamGame(team, picks) {
-  return picks.find((pick) => pick.team === team)?.game || "";
-}
-
 function gradeClass(grade) {
   if (grade === "A+" || grade === "A") return "grade-value grade-a";
   if (grade === "B") return "grade-value grade-b";
@@ -112,31 +65,104 @@ function playClass(play) {
 }
 
 function hrScore(pick) {
+  return Math.round(Number(pick.hr_score || 0));
+}
+
+function decisionScore(pick) {
+  return Math.round(Number(pick.decision_score || 0));
+}
+
+function pickLadder(pick) {
+  const edge = Number(pick.best_edge || 0);
   const confidence = Number(pick.confidence || 0);
-  const edge = Number(pick.best_edge || 0) * 100;
-  const power = Number(pick.power_score || 0) / 2.5;
-  const score = Math.round(confidence * 0.55 + edge * 1.4 + power * 0.35);
-  return Math.max(0, Math.min(99, score));
-}
+  const weakness = Number(pick.pitcher_weakness_score || 0);
+  const spotMatch = Number(pick.pitcher_lineup_weak_spot || 0);
+  const modelProb = Number(pick.model_prob || 0);
+  const lineup = Number(pick.lineup_spot || 0);
+  const backendPlay = String(pick.play || "");
+  const backendTier = String(pick.tier || "");
+  const backendGrade = String(pick.grade || "");
+  const backendDecision = Number(pick.decision_score || 0);
+  const backendHR = Number(pick.hr_score || 0);
 
-function PlayerHeadshot({ pick, large = false }) {
-  return (
-    <div className={large ? "headshot headshot-large" : "headshot"}>
-      {pick.player_headshot ? (
-        <img src={pick.player_headshot} alt={pick.player} />
-      ) : (
-        <span>{initials(pick.player)}</span>
-      )}
-    </div>
-  );
-}
+  if (backendPlay.includes("YES")) {
+    return {
+      label: "MODEL YES 🔥",
+      rank: 5,
+      reason: `${backendGrade || "Grade"} ${backendTier || ""} | HR ${Math.round(backendHR)} | Decision ${Math.round(backendDecision)}`,
+    };
+  }
 
-function TeamLogo({ src, team, size = "md" }) {
-  return (
-    <div className={`team-logo team-logo-${size}`}>
-      {src ? <img src={src} alt={team} /> : <span>{initials(team)}</span>}
-    </div>
-  );
+  if (backendPlay.includes("LEAN")) {
+    return {
+      label: "LEAN ✅",
+      rank: 4,
+      reason: `${backendGrade || "Grade"} ${backendTier || ""} | HR ${Math.round(backendHR)} | Decision ${Math.round(backendDecision)}`,
+    };
+  }
+
+  const hasElitePitcherCombo = weakness >= 10 && spotMatch >= 10;
+  const hasStrongPitcherCombo = weakness >= 8 && spotMatch >= 8;
+  const hasPositiveEdge = edge > 0;
+  const hasGoodEdge = edge >= 0.05;
+  const hasOkayConfidence = confidence >= 65;
+  const hasGoodConfidence = confidence >= 70;
+  const isMiddleOrValueLineup = lineup >= 4 && lineup <= 9;
+
+  if (
+    hasElitePitcherCombo &&
+    hasGoodEdge &&
+    hasGoodConfidence &&
+    isMiddleOrValueLineup
+  ) {
+    return {
+      label: "MUST BET 🔥",
+      rank: 5,
+      reason: "10/10 Weakness + 10/10 Spot Match + strong edge + lineup value",
+    };
+  }
+
+  if (
+    hasElitePitcherCombo &&
+    hasPositiveEdge &&
+    hasOkayConfidence
+  ) {
+    return {
+      label: "STRONG LOOK 💣",
+      rank: 4,
+      reason: "10/10 Weakness + 10/10 Spot Match + positive edge",
+    };
+  }
+
+  if (
+    hasStrongPitcherCombo &&
+    hasPositiveEdge &&
+    confidence >= 60
+  ) {
+    return {
+      label: "SPRINKLE ONLY ⚡",
+      rank: 3,
+      reason: "Strong pitcher setup with positive edge",
+    };
+  }
+
+  if (
+    modelProb >= 0.20 &&
+    confidence >= 75 &&
+    hasPositiveEdge
+  ) {
+    return {
+      label: "WATCH 👀",
+      rank: 2,
+      reason: "Good model profile but missing elite pitcher confirmation",
+    };
+  }
+
+  return {
+    label: "PASS",
+    rank: 1,
+    reason: "Not enough confirmed HR signals",
+  };
 }
 
 function SportsbookLogo({ book }) {
@@ -162,7 +188,22 @@ function Metric({ label, value, tone = "" }) {
   );
 }
 
+function PlayerHeadshot({ pick, large = false }) {
+  return (
+    <div className={large ? "headshot headshot-large" : "headshot"}>
+      {pick.player_headshot ? (
+        <img src={pick.player_headshot} alt={pick.player} />
+      ) : (
+        <span>{initials(pick.player)}</span>
+      )}
+    </div>
+  );
+}
+
 function PlayerCard({ pick, index }) {
+  const dScore = decisionScore(pick);
+  const ladder = pickLadder(pick);
+
   return (
     <article className="player-card">
       <div className="player-top clean-player-top">
@@ -189,12 +230,15 @@ function PlayerCard({ pick, index }) {
       </div>
 
       <div className="rank-badge-row">
-        <span className="edge-badge">EDGE #{pick.top_edge_rank || "-"}</span>
-        <span className="prob-badge">PROB #{pick.top_prob_rank || "-"}</span>
+        <span className="edge-badge">{ladder.label}</span>
+        <span className="prob-badge">Decision {dScore}</span>
         <span className="tier-badge">{pick.tier || "WATCH"}</span>
       </div>
 
       <div className="metric-grid">
+        <Metric label="Pick Ladder" value={ladder.label} />
+        <Metric label="Decision Score" value={dScore} />
+        <Metric label="Reason" value={ladder.reason} />
         <Metric label="Model Prob" value={percent(pick.model_prob)} />
         <Metric
           label="Edge"
@@ -205,8 +249,10 @@ function PlayerCard({ pick, index }) {
         <Metric label="Pitcher Weakness" value={`🔥 ${pick.pitcher_weakness_score ?? 0}/10`} />
         <Metric label="Pitcher Spot Match" value={`🎯 ${pick.pitcher_lineup_weak_spot ?? 0}/10`} />
         <Metric label="HR Score" value={hrScore(pick)} />
-        <Metric label="Raw Prob" value={percent(pick.raw_model_prob)} />
+        <Metric label="EV Score" value={pick.ev_score ?? "-"} />
+        <Metric label="Decision Score" value={decisionScore(pick)} />
         <Metric label="Power Score" value={pick.power_score ?? "-"} />
+        <Metric label="Smash Score" value={pick.smash_score ?? "-"} />
         <Metric label="Lineup Boost" value={pick.lineup_boost ?? "-"} />
         <Metric label="Stake" value={`${pick.stake || 0}u`} />
       </div>
@@ -234,6 +280,9 @@ function StatCard({ icon, label, value }) {
 function ModelPlayOfDay({ pick }) {
   if (!pick) return null;
 
+  const dScore = decisionScore(pick);
+  const ladder = pickLadder(pick);
+
   return (
     <section className="model-play-card">
       <div className="model-main">
@@ -249,56 +298,33 @@ function ModelPlayOfDay({ pick }) {
             <div className="model-pills">
               <span className={gradeClass(pick.grade)}>Grade: {pick.grade}</span>
               <span className={playClass(pick.play)}>Play: {cleanPlay(pick.play)}</span>
+              <span className="tier-badge">{ladder.label}</span>
             </div>
           </div>
         </div>
       </div>
 
       <div className="model-metrics">
+        <Metric label="Decision Score" value={dScore} />
+        <Metric label="Pick Ladder" value={ladder.label} />
         <Metric label="Model Prob" value={percent(pick.model_prob)} />
-        <Metric
-          label="Edge"
-          value={edgePercent(pick.best_edge)}
-          tone={Number(pick.best_edge) >= 0 ? "positive" : "negative"}
-        />
+        <Metric label="Edge" value={edgePercent(pick.best_edge)} />
         <Metric label="Best Odds" value={pick.best_odds} />
-
-        <div className="metric sportsbook-metric">
-          <span>Best Sportsbook</span>
-          <SportsbookLogo book={pick.best_book} />
-        </div>
       </div>
     </section>
   );
 }
 
-function TopPlayerBox({ player }) {
-  if (!player) return null;
-
-  return (
-    <div className="top-player-box">
-      <div className="top-player-title">🚀 Top Player</div>
-      <div className="top-player-name">{player.player}</div>
-      <div className="top-player-stats">
-        <span>{percent(player.model_prob)}</span>
-        <span>•</span>
-        <b className={Number(player.best_edge) >= 0 ? "positive" : "negative"}>
-          {edgePercent(player.best_edge)}
-        </b>
-      </div>
-    </div>
-  );
-}
-
-function MatchupDropdown({ group, allPicks, defaultOpen = false }) {
+function MatchupDropdown({ group, defaultOpen = false }) {
   const [open, setOpen] = useState(defaultOpen);
 
-  const opponent = opponentFromGame(group.game, group.team);
-  const opponentLogo = getTeamLogo(opponent, allPicks);
-
   const topPlayer = [...group.players].sort((a, b) => {
-    const probDiff = Number(b.model_prob || 0) - Number(a.model_prob || 0);
-    if (probDiff !== 0) return probDiff;
+    const hrDiff = hrScore(b) - hrScore(a);
+    if (hrDiff !== 0) return hrDiff;
+
+    const decisionDiff = decisionScore(b) - decisionScore(a);
+    if (decisionDiff !== 0) return decisionDiff;
+
     return Number(b.best_edge || 0) - Number(a.best_edge || 0);
   })[0];
 
@@ -306,22 +332,20 @@ function MatchupDropdown({ group, allPicks, defaultOpen = false }) {
     <section className="matchup-card">
       <button className="matchup-header" onClick={() => setOpen(!open)}>
         <div className="matchup-title-row">
-          <TeamLogo
-            src={group.team_logo || getTeamLogo(group.team, allPicks)}
-            team={group.team}
-            size="lg"
-          />
-
           <h2>{group.team}</h2>
-
           <span className="matchup-vs">vs</span>
-
-          <h3>{opponent || "Opponent"}</h3>
-
-          <TeamLogo src={opponentLogo} team={opponent} size="md" />
+          <h3>{group.opponent || "Opponent"}</h3>
         </div>
 
-        <TopPlayerBox player={topPlayer} />
+        <div className="top-player-box">
+          <div className="top-player-title">🚀 Top Pick</div>
+          <div className="top-player-name">{topPlayer?.player}</div>
+          <div className="top-player-stats">
+            <span>{pickLadder(topPlayer).label}</span>
+            <span>•</span>
+            <b>{edgePercent(topPlayer?.best_edge)}</b>
+          </div>
+        </div>
 
         <div className="dropdown-control">
           <span>{group.players.length}</span>
@@ -340,44 +364,6 @@ function MatchupDropdown({ group, allPicks, defaultOpen = false }) {
   );
 }
 
-function TeamShowcaseSection({ team, players, allPicks, rankMode = "edge" }) {
-  const logo = getTeamLogo(team, allPicks);
-  const game = getTeamGame(team, allPicks);
-  const opponent = opponentFromGame(game, team);
-  const opponentLogo = getTeamLogo(opponent, allPicks);
-
-  const subtitle =
-    rankMode === "edge"
-      ? `Top ${players.length} by highest edge`
-      : `Top ${players.length} by highest model probability`;
-
-  return (
-    <section className="team-showcase-section">
-      <div className="team-showcase-header">
-        <div className="team-showcase-team">
-          <TeamLogo src={logo} team={team} size="lg" />
-          <h2>{team}</h2>
-        </div>
-
-        <div className="team-showcase-vs">VS</div>
-
-        <div className="team-showcase-team opponent-side">
-          <h3>{opponent || "Opponent"}</h3>
-          <TeamLogo src={opponentLogo} team={opponent} size="lg" />
-        </div>
-      </div>
-
-      <div className="team-showcase-subtitle">{subtitle}</div>
-
-      <div className="top3-grid">
-        {players.map((pick, index) => (
-          <PlayerCard key={`${team}-${pick.player}-${index}`} pick={pick} index={index} />
-        ))}
-      </div>
-    </section>
-  );
-}
-
 function YesPlaysSection({ yesPicks }) {
   const [tracker, setTracker] = useState(null);
 
@@ -389,7 +375,7 @@ function YesPlaysSection({ yesPicks }) {
     <section className="team-showcase-section">
       <div className="page-title">
         <h2>🔥 YES PLAYS 🔥</h2>
-        <p>Qualified plays using Model Prob, Edge, Confidence, Top Edge Rank, and Top Probability Rank</p>
+        <p>YES, POWER BAT, and LEAN plays ranked by HR Score first, then Decision Score.</p>
       </div>
 
       {tracker && (
@@ -402,37 +388,28 @@ function YesPlaysSection({ yesPicks }) {
         </div>
       )}
 
-      {yesPicks.length === 0 ? (
-        <div className="empty-state">No YES plays found after current filters.</div>
-      ) : (
-        <div className="top3-grid">
-          {yesPicks.map((pick, index) => (
-            <PlayerCard key={`yes-${pick.player}-${index}`} pick={pick} index={index} />
-          ))}
-        </div>
-      )}
+      <div className="top3-grid">
+        {yesPicks.map((pick, index) => (
+          <PlayerCard key={`yes-${pick.player}-${index}`} pick={pick} index={index} />
+        ))}
+      </div>
     </section>
   );
 }
 
-
-function SmashSpotSection({ smashSpotPicks }) {
+function SmashSpotSection({ picks }) {
   return (
     <section className="team-showcase-section">
       <div className="page-title">
         <h2>🔥 SMASH SPOT PLAYS 🔥</h2>
-        <p>YES plays with 10/10 Pitcher Weakness and 10/10 Pitcher Spot Match</p>
+        <p>Players with elite pitcher weakness and pitcher spot match.</p>
       </div>
 
-      {smashSpotPicks.length === 0 ? (
-        <div className="empty-state">No Smash Spot plays found yet.</div>
-      ) : (
-        <div className="top3-grid">
-          {smashSpotPicks.map((pick, index) => (
-            <PlayerCard key={`smash-${pick.player}-${index}`} pick={pick} index={index} />
-          ))}
-        </div>
-      )}
+      <div className="top3-grid">
+        {picks.map((pick, index) => (
+          <PlayerCard key={`smash-${pick.player}-${index}`} pick={pick} index={index} />
+        ))}
+      </div>
     </section>
   );
 }
@@ -448,7 +425,7 @@ function ResultsCenter() {
     <section className="team-showcase-section">
       <div className="page-title">
         <h2>📊 RESULTS CENTER</h2>
-        <p>Live YES play results, profit, snapshot, and grading status</p>
+        <p>Live YES play results, profit, snapshot, and grading status.</p>
       </div>
 
       <div className="results-table">
@@ -511,55 +488,44 @@ export default function App() {
     return picks.filter((pick) => pick.player && pick.team);
   }, [picks]);
 
-  const yesPicks = useMemo(() => {
-  const tierScore = (pick) => {
-    const tier = String(pick.tier || "").toUpperCase();
+  const rankedPicks = useMemo(() => {
+    return [...validPicks].sort((a, b) => {
+      const hrDiff = hrScore(b) - hrScore(a);
+      if (hrDiff !== 0) return hrDiff;
 
-    if (tier.includes("TIER 1")) return 3;
-    if (tier.includes("TIER 2")) return 2;
-    return 1;
-  };
+      const decisionDiff = decisionScore(b) - decisionScore(a);
+      if (decisionDiff !== 0) return decisionDiff;
 
-  return validPicks
-    .filter((pick) => pick.play?.includes("YES"))
-    .sort((a, b) => {
-      const tierDiff = tierScore(b) - tierScore(a);
-      if (tierDiff !== 0) return tierDiff;
-
-      const smashDiff =
-        Number(b.pitcher_weakness_score || 0) +
-        Number(b.pitcher_lineup_weak_spot || 0) -
-        (Number(a.pitcher_weakness_score || 0) +
-          Number(a.pitcher_lineup_weak_spot || 0));
-
-      if (smashDiff !== 0) return smashDiff;
-
-      const edgeDiff = Number(b.best_edge || 0) - Number(a.best_edge || 0);
-      if (edgeDiff !== 0) return edgeDiff;
-
-      return Number(b.confidence || 0) - Number(a.confidence || 0);
+      return Number(b.best_edge || 0) - Number(a.best_edge || 0);
     });
-}, [validPicks]);
+  }, [validPicks]);
 
-const smashSpotPicks = useMemo(() => {
-  return yesPicks.filter(
-    (pick) =>
-      Number(pick.pitcher_weakness_score || 0) >= 10 &&
-      Number(pick.pitcher_lineup_weak_spot || 0) >= 10
-  );
-}, [yesPicks]);
+  const yesPicks = useMemo(() => {
+    return rankedPicks.filter((pick) => pick.play?.includes("YES"));
+  }, [rankedPicks]);
+
+  const smashSpotPicks = useMemo(() => {
+    return rankedPicks.filter((pick) => {
+      const smash = Number(pick.smash_score || 0);
+      const hr = Number(pick.hr_score || 0);
+      const decision = Number(pick.decision_score || 0);
+
+      return smash >= 70 || (hr >= 98 && decision >= 80);
+    });
+  }, [rankedPicks]);
 
   const matchupGroups = useMemo(() => {
     const grouped = {};
 
-    validPicks.forEach((pick) => {
+    rankedPicks.forEach((pick) => {
+      const opponent = opponentFromGame(pick.game, pick.team);
       const key = `${pick.game}__${pick.team}`;
 
       if (!grouped[key]) {
         grouped[key] = {
           game: pick.game,
           team: pick.team,
-          team_logo: pick.team_logo || getTeamLogo(pick.team, validPicks),
+          opponent,
           players: [],
         };
       }
@@ -567,81 +533,36 @@ const smashSpotPicks = useMemo(() => {
       grouped[key].players.push(pick);
     });
 
-    Object.keys(grouped).forEach((key) => {
-      grouped[key].players = grouped[key].players.sort((a, b) => {
-        const probDiff = Number(b.model_prob || 0) - Number(a.model_prob || 0);
-        if (probDiff !== 0) return probDiff;
-        return Number(b.best_edge || 0) - Number(a.best_edge || 0);
-      });
-    });
+    return Object.values(grouped);
+  }, [rankedPicks]);
 
-    return Object.values(grouped).sort((a, b) => {
-      const timeA = a.players[0]?.game_time_et || "";
-      const timeB = b.players[0]?.game_time_et || "";
-      const timeSort = timeA.localeCompare(timeB);
-      if (timeSort !== 0) return timeSort;
-      return a.team.localeCompare(b.team);
-    });
-  }, [validPicks]);
-
-  const topPlayersByTeam = useMemo(() => {
+  const groupedByTeam = useMemo(() => {
     const grouped = {};
 
-    validPicks.forEach((pick) => {
+    rankedPicks.forEach((pick) => {
       if (!grouped[pick.team]) grouped[pick.team] = [];
       grouped[pick.team].push(pick);
     });
 
-    return Object.entries(grouped)
-      .map(([team, players]) => [
-        team,
-        [...players]
-          .sort((a, b) => {
-            const edgeDiff = Number(b.best_edge || 0) - Number(a.best_edge || 0);
-            if (edgeDiff !== 0) return edgeDiff;
-            return Number(b.model_prob || 0) - Number(a.model_prob || 0);
-          })
-          .slice(0, 3),
-      ])
-      .sort(([a], [b]) => a.localeCompare(b));
-  }, [validPicks]);
+    return Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b));
+  }, [rankedPicks]);
 
-  const highProbabilityByTeam = useMemo(() => {
-    const grouped = {};
-
-    validPicks.forEach((pick) => {
-      if (!grouped[pick.team]) grouped[pick.team] = [];
-      grouped[pick.team].push(pick);
-    });
-
-    return Object.entries(grouped)
-      .map(([team, players]) => [
-        team,
-        [...players]
-          .sort((a, b) => {
-            const probDiff = Number(b.model_prob || 0) - Number(a.model_prob || 0);
-            if (probDiff !== 0) return probDiff;
-            return Number(b.best_edge || 0) - Number(a.best_edge || 0);
-          })
-          .slice(0, 4),
-      ])
-      .sort(([a], [b]) => a.localeCompare(b));
-  }, [validPicks]);
-
-  const modelPlay = useMemo(() => {
-    if (!validPicks.length) return null;
-
-    return [...validPicks].sort((a, b) => {
-      const edgeDiff = Number(b.best_edge || 0) - Number(a.best_edge || 0);
-      if (edgeDiff !== 0) return edgeDiff;
-      return Number(b.model_prob || 0) - Number(a.model_prob || 0);
-    })[0];
-  }, [validPicks]);
+  const modelPlay = rankedPicks[0] || null;
 
   const avgEdge = useMemo(() => {
-    if (!validPicks.length) return "0.0%";
-    const sum = validPicks.reduce((acc, pick) => acc + Number(pick.best_edge || 0), 0);
-    return edgePercent(sum / validPicks.length);
+    const validEdges = validPicks.filter((pick) => {
+      const edge = Number(pick.best_edge);
+      return Number.isFinite(edge) && edge > -100;
+    });
+
+    if (!validEdges.length) return "0.0%";
+
+    const sum = validEdges.reduce(
+      (acc, pick) => acc + Number(pick.best_edge || 0),
+      0
+    );
+
+    return edgePercent(sum / validEdges.length);
   }, [validPicks]);
 
   const topEdge = useMemo(() => {
@@ -675,74 +596,25 @@ const smashSpotPicks = useMemo(() => {
         </div>
 
         <nav>
-          <button className={activeTab === "dashboard" ? "active" : ""} onClick={() => switchTab("dashboard")}>
-            🏠 Dashboard
-          </button>
-
-          <button className={activeTab === "smash" ? "active" : ""} onClick={() => switchTab("smash")}>
-             🔥 Smash Spot
-          </button>
-          
-          <button className={activeTab === "yes" ? "active" : ""} onClick={() => switchTab("yes")}>
-            🔥 YES Plays
-          </button>
-
-          <button className={activeTab === "results" ? "active" : ""} onClick={() => switchTab("results")}>
-            📊 Results Center
-          </button>
-
-          <button className={activeTab === "top" ? "active" : ""} onClick={() => switchTab("top")}>
-            🔥 Top Players
-          </button>
-
-          <button className={activeTab === "probability" ? "active" : ""} onClick={() => switchTab("probability")}>
-            📈 High Probability Plays
-          </button>
-
-          <button className={activeTab === "health" ? "active" : ""} onClick={() => switchTab("health")}>
-            🩺 Model Health
-          </button>
-
-          <button className={activeTab === "confidence" ? "active" : ""} onClick={() => switchTab("confidence")}>
-            📈 Confidence Analytics
-          </button>
-
-          <button className={activeTab === "snapshot" ? "active" : ""} onClick={() => switchTab("snapshot")}
-          > 📸 Snapshot Analytics
-          </button>
-
-          <button className={activeTab === "performers" ? "active" : ""} onClick={() => switchTab("performers")}>
-            🏆 Top Performers
-          </button>
-
-          <button className={activeTab === "features" ? "active" : ""} onClick={() => switchTab("features")}>
-            🧬 Feature Analytics
-          </button>
-
-          <button className={activeTab === "autotuner" ? "active" : ""}  onClick={() => switchTab("autotuner")}>
-            🤖 Auto Tuner
-          </button>
-
-          <button className={activeTab === "ev" ? "active" : ""} onClick={() => switchTab("ev")}>
-            💰 EV Analytics
-          </button>
-
-         <button className={activeTab === "teams" ? "active" : ""} onClick={() => switchTab("teams")}>
-            🏟️ Team Analytics
-         </button> 
+          <button className={activeTab === "dashboard" ? "active" : ""} onClick={() => switchTab("dashboard")}>🏠 Dashboard</button>
+          <button className={activeTab === "smash" ? "active" : ""} onClick={() => switchTab("smash")}>🔥 Smash Spot</button>
+          <button className={activeTab === "yes" ? "active" : ""} onClick={() => switchTab("yes")}>🔥 YES Plays</button>
+          <button className={activeTab === "results" ? "active" : ""} onClick={() => switchTab("results")}>📊 Results Center</button>
+          <button className={activeTab === "top" ? "active" : ""} onClick={() => switchTab("top")}>🔥 Top Players</button>
+          <button className={activeTab === "health" ? "active" : ""} onClick={() => switchTab("health")}>🩺 Model Health</button>
+          <button className={activeTab === "confidence" ? "active" : ""} onClick={() => switchTab("confidence")}>📈 Confidence Analytics</button>
+          <button className={activeTab === "snapshot" ? "active" : ""} onClick={() => switchTab("snapshot")}>📸 Snapshot Analytics</button>
+          <button className={activeTab === "performers" ? "active" : ""} onClick={() => switchTab("performers")}>🏆 Top Performers</button>
+          <button className={activeTab === "features" ? "active" : ""} onClick={() => switchTab("features")}>🧬 Feature Analytics</button>
+          <button className={activeTab === "autotuner" ? "active" : ""} onClick={() => switchTab("autotuner")}>🤖 Auto Tuner</button>
+          <button className={activeTab === "ev" ? "active" : ""} onClick={() => switchTab("ev")}>💰 EV Analytics</button>
+          <button className={activeTab === "teams" ? "active" : ""} onClick={() => switchTab("teams")}>🏟️ Team Analytics</button>
         </nav>
 
         <div className="bankroll-card">
           <span>Refresh</span>
           <strong>Every 4 Hours</strong>
           <button onClick={loadSlate}>Refresh Now</button>
-        </div>
-
-        <div className="motto-card">
-          <div>💎</div>
-          <p>Discipline.</p>
-          <p>Data.</p>
-          <p>Diamonds.</p>
         </div>
       </aside>
 
@@ -790,26 +662,12 @@ const smashSpotPicks = useMemo(() => {
           </>
         )}
 
-        {activeTab === "top" && (
-          <div className="page-title">
-            <h2>💎 TOP PLAYERS 💎</h2>
-            <p>Top 3 by highest edge for each team</p>
-          </div>
-        )}
-
-        {activeTab === "probability" && (
-          <div className="page-title">
-            <h2>📈 HIGH PROBABILITY PLAYS</h2>
-            <p>Top 4 by highest model probability for each team</p>
-          </div>
-        )}
-
         {activeTab !== "health" &&
           activeTab !== "yes" &&
           activeTab !== "results" &&
           activeTab !== "smash" && (
             <ModelPlayOfDay pick={modelPlay} />
-        )}
+          )}
 
         {activeTab === "health" ? (
           <ModelHealth />
@@ -818,13 +676,13 @@ const smashSpotPicks = useMemo(() => {
         ) : validPicks.length === 0 ? (
           <div className="empty-state">No completed player rows yet. Run stat enrichment and the model.</div>
         ) : activeTab === "smash" ? (
-          <SmashSpotSection smashSpotPicks={smashSpotPicks} />
+          <SmashSpotSection picks={smashSpotPicks} />
         ) : activeTab === "yes" ? (
           <YesPlaysSection yesPicks={yesPicks} />
         ) : activeTab === "results" ? (
           <ResultsCenter />
         ) : activeTab === "confidence" ? (
-          <ConfidenceAnalytics /> 
+          <ConfidenceAnalytics />
         ) : activeTab === "snapshot" ? (
           <SnapshotAnalytics />
         ) : activeTab === "performers" ? (
@@ -836,39 +694,31 @@ const smashSpotPicks = useMemo(() => {
         ) : activeTab === "ev" ? (
           <EvAnalytics />
         ) : activeTab === "teams" ? (
-           <TeamAnalytics />
-        ) : activeTab === "dashboard" ? (
-          <section className="matchup-list">
-            {matchupGroups.map((group, index) => (
-              <MatchupDropdown
-                key={`${group.game}-${group.team}`}
-                group={group}
-                allPicks={validPicks}
-                defaultOpen={index < 1}
-              />
-            ))}
-          </section>
+          <TeamAnalytics />
         ) : activeTab === "top" ? (
           <section className="team-showcase-grid">
-            {topPlayersByTeam.map(([team, players]) => (
-              <TeamShowcaseSection
-                key={team}
-                team={team}
-                players={players}
-                allPicks={validPicks}
-                rankMode="edge"
-              />
+            {groupedByTeam.map(([team, players]) => (
+              <section className="team-showcase-section" key={team}>
+                <div className="page-title">
+                  <h2>{team}</h2>
+                  <p>Ranked by HR Score first, then Decision Score.</p>
+                </div>
+
+                <div className="top3-grid">
+                  {players.map((pick, index) => (
+                    <PlayerCard key={`${team}-${pick.player}-${index}`} pick={pick} index={index} />
+                  ))}
+                </div>
+              </section>
             ))}
           </section>
         ) : (
-          <section className="team-showcase-grid">
-            {highProbabilityByTeam.map(([team, players]) => (
-              <TeamShowcaseSection
-                key={team}
-                team={team}
-                players={players}
-                allPicks={validPicks}
-                rankMode="probability"
+          <section className="matchup-list">
+            {matchupGroups.map((group) => (
+              <MatchupDropdown
+                key={`${group.game}-${group.team}`}
+                group={group}
+                defaultOpen={true}
               />
             ))}
           </section>

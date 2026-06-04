@@ -1046,18 +1046,21 @@ nav button:hover {
 }
 
 .results-table {
-  display: grid;
-  gap: 8px;
+  width: 100%;
+  overflow-x: auto;
 }
 
 .results-row {
   display: grid;
-  grid-template-columns: 1.5fr 1fr 1fr 1fr .7fr .7fr .9fr .8fr;
-  gap: 10px;
-  padding: 14px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.06);
+  grid-template-columns: 1.4fr 1fr 1fr 1fr 1fr 0.8fr 0.6fr 1fr 0.8fr;
+  gap: 12px;
   align-items: center;
+  padding: 14px 12px;
+}
+
+.results-row span {
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 .results-header {

@@ -25,6 +25,34 @@ app.add_middleware(
 )
 
 
+def safe_float(value, default=0):
+    try:
+        if value is None:
+            return default
+        if pd.isna(value):
+            return default
+        value = str(value).strip()
+        if value == "" or value.lower() in ["nan", "none", "<na>"]:
+            return default
+        return float(value)
+    except Exception:
+        return default
+
+
+def safe_str(value, default=""):
+    try:
+        if value is None:
+            return default
+        if pd.isna(value):
+            return default
+        value = str(value).strip()
+        if value.lower() in ["nan", "none", "<na>"]:
+            return default
+        return value
+    except Exception:
+        return default
+
+
 def empty_tracker():
     return {
         "date": "",
@@ -67,6 +95,22 @@ def latest_snapshot_df(df):
     return today_df, latest_date, active_snapshot
 
 
+def make_json_safe(value):
+    if isinstance(value, dict):
+        return {k: make_json_safe(v) for k, v in value.items()}
+
+    if isinstance(value, list):
+        return [make_json_safe(v) for v in value]
+
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
+
+    return value
+
+
 def clean_result(value):
     result = str(value).strip()
 
@@ -82,6 +126,27 @@ def clean_result(value):
     return result
 
 
+def headshot_url(player_id):
+    if player_id is None:
+        return ""
+
+    try:
+        if pd.isna(player_id):
+            return ""
+    except Exception:
+        pass
+
+    clean_id = str(player_id).replace(".0", "").strip()
+
+    if clean_id == "" or clean_id.lower() in ["nan", "none", "<na>"]:
+        return ""
+
+    return (
+        "https://img.mlbstatic.com/mlb-photos/image/upload/"
+        f"w_180,q_auto:best/v1/people/{clean_id}/headshot/67/current"
+    )
+
+
 @app.get("/")
 def home():
     return {"status": "HR model backend running"}
@@ -89,9 +154,85 @@ def home():
 
 @app.get("/api/slate")
 def get_slate():
-    picks = run()
+    results_path = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "data",
+        "hr_model_results.csv"
+    )
+
+    if not os.path.exists(results_path):
+        return {
+            "count": 0,
+            "date": "",
+            "snapshot": "MANUAL",
+            "picks": [],
+        }
+
+    df = pd.read_csv(results_path)
+    df = df.fillna("")
+
+    if df.empty:
+        return {
+            "count": 0,
+            "date": "",
+            "snapshot": "MANUAL",
+            "picks": [],
+        }
+
+    picks = []
+
+    for _, row in df.iterrows():
+        picks.append({
+            "date": safe_str(row.get("Date", "")),
+            "game": safe_str(row.get("Game", "")),
+            "game_time": safe_str(row.get("GameTime", "")),
+            "game_time_et": safe_str(row.get("GameTimeET", "")),
+            "snapshot": safe_str(row.get("Snapshot", "MANUAL"), "MANUAL"),
+
+            "player": safe_str(row.get("Player", "")),
+            "player_id": safe_str(row.get("player_id", "")),
+            "player_headshot": headshot_url(row.get("player_id", "")),
+            "team": safe_str(row.get("Team", "")),
+            "pitcher": safe_str(row.get("Pitcher", "")),
+            "lineup_spot": safe_str(row.get("LineupSpot", "")),
+            "lineup_source": safe_str(row.get("LineupSource", "")),
+
+            "best_book": safe_str(row.get("BestBook", "")),
+            "best_odds": safe_str(row.get("BestOdds", "")),
+
+            "model_prob": safe_float(row.get("ModelProb")),
+            "raw_model_prob": safe_float(row.get("RawModelProb")),
+            "best_edge": safe_float(row.get("Edge")),
+            "edge": safe_float(row.get("Edge")),
+
+            "confidence": safe_float(row.get("Confidence")),
+            "power_score": safe_float(row.get("PowerScore")),
+            "hr_score": safe_float(row.get("HRScore")),
+            "ev_score": safe_float(row.get("EVScore")),
+            "decision_score": safe_float(row.get("DecisionScore")),
+            "smash_score": safe_float(row.get("SmashScore")),
+
+            "pitcher_weakness_score": safe_float(row.get("PitcherScore", row.get("PitcherHRWeaknessScore", 0))),
+            "pitcher_lineup_weak_spot": safe_float(row.get("PitcherLineupScore", row.get("PitcherLineupWeakSpot", 0))),
+
+            "grade": safe_str(row.get("Grade", "")),
+            "tier": safe_str(row.get("Tier", "")),
+            "play": safe_str(row.get("Play", "")),
+            "stake": safe_float(row.get("Stake", 0)),
+
+            "top_hr_rank": safe_str(row.get("TopHRRank", "")),
+            "top_edge_rank": safe_str(row.get("TopEdgeRank", "")),
+            "top_prob_rank": safe_str(row.get("TopProbRank", "")),
+            "top_smash_rank": safe_str(row.get("TopSmashRank", "")),
+        })
+
+    latest_date = str(df["Date"].iloc[0]) if "Date" in df.columns else ""
+
     return {
         "count": len(picks),
+        "date": latest_date,
+        "snapshot": "MANUAL",
         "picks": picks,
     }
 
@@ -114,7 +255,6 @@ def yes_tracker():
         return empty_tracker()
 
     yes_df = today_df[today_df["Play"] == "YES 🔥"].copy()
-
     total_yes = len(yes_df)
 
     if "Result" not in yes_df.columns:
@@ -177,18 +317,20 @@ def yes_results():
     for _, row in yes_df.iterrows():
         rows.append({
             "date": latest_date,
-            "player": row.get("Player", ""),
-            "team": row.get("Team", ""),
-            "pitcher": row.get("Pitcher", ""),
-            "snapshot": row.get("Snapshot", active_snapshot),
-            "book": row.get("BestBook", ""),
-            "odds": row.get("BestOdds", ""),
-            "confidence": row.get("Confidence", ""),
-            "edge": row.get("Edge", ""),
-            "grade": row.get("Grade", ""),
-            "stake": row.get("Stake", ""),
+            "player": safe_str(row.get("Player", "")),
+            "player_id": safe_str(row.get("player_id", "")),
+            "player_headshot": headshot_url(row.get("player_id", "")),
+            "team": safe_str(row.get("Team", "")),
+            "pitcher": safe_str(row.get("Pitcher", "")),
+            "snapshot": safe_str(row.get("Snapshot", active_snapshot)),
+            "book": safe_str(row.get("BestBook", "")),
+            "odds": safe_str(row.get("BestOdds", "")),
+            "confidence": safe_float(row.get("Confidence", 0)),
+            "edge": safe_float(row.get("Edge", 0)),
+            "grade": safe_str(row.get("Grade", "")),
+            "stake": safe_float(row.get("Stake", 0)),
             "result": clean_result(row.get("Result", "")),
-            "profit": row.get("Profit", 0),
+            "profit": safe_float(row.get("Profit", 0)),
         })
 
     return rows
@@ -372,6 +514,7 @@ def confidence_analytics():
         "buckets": buckets,
     }
 
+
 @app.get("/snapshot-analytics")
 def snapshot_analytics():
     df = load_history()
@@ -442,7 +585,7 @@ def snapshot_analytics():
     if usable:
         best_snapshot = sorted(
             usable,
-            key=lambda x: (x["roi"], x["hit_rate"], x["hr_hits"]),
+            key=lambda x: (x["roi"], x["roi"], x["hr_hits"]),
             reverse=True,
         )[0]
 
@@ -459,6 +602,7 @@ def snapshot_analytics():
         "total_roi": total_roi,
         "snapshots": snapshots,
     }
+
 
 @app.get("/top-performer-analytics")
 def top_performer_analytics():
@@ -535,6 +679,7 @@ def top_performer_analytics():
         "players": rows[:50],
     }
 
+
 @app.get("/feature-analytics")
 def feature_analytics():
     df = load_history()
@@ -598,8 +743,8 @@ def feature_analytics():
         ("Lineup Spot 5-9", yes_df["LineupSpot"].between(5, 9)),
         ("Grade A/A+", yes_df["Grade"].astype(str).isin(["A", "A+"])),
         ("Grade B", yes_df["Grade"].astype(str) == "B"),
-        ("Tier 1", yes_df["Tier"].astype(str).str.contains("TIER 1", case=False, na=False)),
-        ("Tier 2", yes_df["Tier"].astype(str).str.contains("TIER 2", case=False, na=False)),
+        ("Tier GOD", yes_df["Tier"].astype(str).str.contains("GOD", case=False, na=False)),
+        ("Tier ELITE", yes_df["Tier"].astype(str).str.contains("ELITE", case=False, na=False)),
     ]
 
     features = []
@@ -665,9 +810,9 @@ def feature_analytics():
         "features": features,
     }
 
+
 @app.get("/auto-tuner")
 def auto_tuner():
-
     try:
         confidence = confidence_analytics()
         snapshots = snapshot_analytics()
@@ -706,6 +851,7 @@ def auto_tuner():
             "error": str(e)
         }
 
+
 @app.get("/ev-analytics")
 def ev_analytics():
     df = load_history()
@@ -723,19 +869,19 @@ def ev_analytics():
     yes_df = df[df["Play"] == "YES 🔥"].copy()
 
     yes_df = yes_df.sort_values(
-    by=["Date", "Snapshot", "Player", "Edge"],
-    ascending=[True, True, True, False],
-)
+        by=["Date", "Snapshot", "Player", "Edge"],
+        ascending=[True, True, True, False],
+    )
 
     yes_df = yes_df.drop_duplicates(
-    subset=["Date", "Player"],
-    keep="last",
-)
+        subset=["Date", "Player"],
+        keep="last",
+    )
 
     if yes_df.empty:
         return empty
 
-    for col in ["Player", "Team", "BestBook", "BestOdds", "ModelProb", "Edge", "Confidence", "Result", "Profit"]:
+    for col in ["Player", "Team", "BestBook", "BestOdds", "ModelProb", "Edge", "Confidence", "SmashScore", "SmashTier", "Result", "Profit"]:
         if col not in yes_df.columns:
             yes_df[col] = ""
 
@@ -743,6 +889,8 @@ def ev_analytics():
     yes_df["Edge"] = pd.to_numeric(yes_df["Edge"], errors="coerce").fillna(0)
     yes_df["Confidence"] = pd.to_numeric(yes_df["Confidence"], errors="coerce").fillna(0)
     yes_df["Profit"] = pd.to_numeric(yes_df["Profit"], errors="coerce").fillna(0)
+    yes_df["SmashScore"] = pd.to_numeric(yes_df.get("SmashScore", 0), errors="coerce").fillna(0)
+    yes_df["SmashTier"] = yes_df["SmashTier"].fillna("").replace("nan", "").astype(str).str.strip()
 
     def implied_prob(odds):
         try:
@@ -762,16 +910,18 @@ def ev_analytics():
         edge = model_prob - implied
 
         plays.append({
-            "player": row.get("Player", ""),
-            "team": row.get("Team", ""),
-            "book": row.get("BestBook", ""),
-            "odds": odds,
+            "player": safe_str(row.get("Player", "")),
+            "team": safe_str(row.get("Team", "")),
+            "book": safe_str(row.get("BestBook", "")),
+            "odds": safe_str(odds),
             "model_prob": round(model_prob * 100, 1),
             "implied_prob": round(implied * 100, 1),
             "ev_edge": round(edge * 100, 1),
-            "confidence": row.get("Confidence", ""),
+            "confidence": safe_float(row.get("Confidence", 0)),
+            "smash_score": safe_float(row.get("SmashScore", 0)),
+            "smash_tier": safe_str(row.get("SmashTier", "")),
             "result": clean_result(row.get("Result", "")),
-            "profit": round(float(row.get("Profit", 0)), 2),
+            "profit": round(safe_float(row.get("Profit", 0)), 2),
         })
 
     plays = sorted(plays, key=lambda x: x["ev_edge"], reverse=True)
@@ -787,6 +937,7 @@ def ev_analytics():
         "total_yes_plays": len(plays),
         "plays": plays[:75],
     }
+
 
 @app.get("/team-analytics")
 def team_analytics():
@@ -868,9 +1019,9 @@ def team_analytics():
         "teams": rows,
     }
 
+
 @app.get("/generate-player-adjustments")
 def generate_player_adjustments():
-
     df = load_history()
 
     if df.empty:
@@ -881,7 +1032,6 @@ def generate_player_adjustments():
     rows = []
 
     for player, pdf in yes_df.groupby("Player"):
-
         plays = len(pdf)
 
         if plays < 3:
