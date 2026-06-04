@@ -7,7 +7,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 BASE_DIR = os.path.dirname(__file__)
 DATA_DIR = os.path.join(BASE_DIR, "..", "data")
+
 HISTORY_PATH = os.path.join(DATA_DIR, "hr_results_history.csv")
+RESULTS_PATH = os.path.join(DATA_DIR, "hr_model_results.csv")
 
 sys.path.append(BASE_DIR)
 
@@ -31,10 +33,14 @@ def safe_float(value, default=0):
             return default
         if pd.isna(value):
             return default
+
         value = str(value).strip()
+
         if value == "" or value.lower() in ["nan", "none", "<na>"]:
             return default
+
         return float(value)
+
     except Exception:
         return default
 
@@ -45,10 +51,14 @@ def safe_str(value, default=""):
             return default
         if pd.isna(value):
             return default
+
         value = str(value).strip()
+
         if value.lower() in ["nan", "none", "<na>"]:
             return default
+
         return value
+
     except Exception:
         return default
 
@@ -68,7 +78,25 @@ def empty_tracker():
 def load_history():
     if not os.path.exists(HISTORY_PATH):
         return pd.DataFrame()
-    return pd.read_csv(HISTORY_PATH)
+
+    try:
+        return pd.read_csv(HISTORY_PATH)
+
+    except Exception:
+        return pd.DataFrame()
+
+
+def load_results():
+    if not os.path.exists(RESULTS_PATH):
+        return pd.DataFrame()
+
+    try:
+        df = pd.read_csv(RESULTS_PATH)
+        df = df.fillna("")
+        return df
+
+    except Exception:
+        return pd.DataFrame()
 
 
 def latest_snapshot_df(df):
@@ -84,7 +112,7 @@ def latest_snapshot_df(df):
     active_snapshot = ""
 
     if "Snapshot" in today_df.columns:
-        today_df["Snapshot"] = today_df["Snapshot"].astype(str).str.strip()
+        today_df["Snapshot"] = today_df["Snapshot"].astype(str).str.upper().str.strip()
 
         for snap in ["LOCK", "ONE_HOUR", "MORNING", "MANUAL"]:
             if snap in today_df["Snapshot"].values:
@@ -147,6 +175,122 @@ def headshot_url(player_id):
     )
 
 
+def result_row(row):
+    play_code = safe_str(row.get("PlayCode", ""))
+    tier_code = safe_str(row.get("TierCode", ""))
+
+    play_display = safe_str(row.get("Play", ""))
+    tier_display = safe_str(row.get("Tier", ""))
+
+    if play_code == "" and play_display:
+        if "YES" in play_display.upper():
+            play_code = "YES"
+        elif "POWER" in play_display.upper():
+            play_code = "POWER_BAT"
+        elif "VALUE" in play_display.upper():
+            play_code = "VALUE_LEAN"
+        elif "NO ODDS" in play_display.upper():
+            play_code = "NO_ODDS"
+        elif "PASS" in play_display.upper():
+            play_code = "PASS"
+
+    return {
+        "date": safe_str(row.get("Date", "")),
+        "game": safe_str(row.get("Game", "")),
+        "game_time": safe_str(row.get("GameTime", "")),
+        "game_time_et": safe_str(row.get("GameTimeET", "")),
+        "snapshot": safe_str(row.get("Snapshot", "MANUAL"), "MANUAL"),
+
+        "player": safe_str(row.get("Player", "")),
+        "Player": safe_str(row.get("Player", "")),
+
+        "player_id": safe_str(row.get("player_id", "")),
+        "player_headshot": headshot_url(row.get("player_id", "")),
+
+        "team": safe_str(row.get("Team", "")),
+        "Team": safe_str(row.get("Team", "")),
+
+        "pitcher": safe_str(row.get("Pitcher", "")),
+        "Pitcher": safe_str(row.get("Pitcher", "")),
+
+        "lineup_spot": safe_str(row.get("LineupSpot", "")),
+        "LineupSpot": safe_str(row.get("LineupSpot", "")),
+        "lineup_source": safe_str(row.get("LineupSource", "")),
+
+        "best_book": safe_str(row.get("BestBook", "")),
+        "BestBook": safe_str(row.get("BestBook", "")),
+
+        "best_odds": safe_str(row.get("BestOdds", "")),
+        "BestOdds": safe_str(row.get("BestOdds", "")),
+
+        "model_prob": safe_float(row.get("ModelProb")),
+        "ModelProb": safe_float(row.get("ModelProb")),
+
+        "raw_model_prob": safe_float(row.get("RawModelProb")),
+        "RawModelProb": safe_float(row.get("RawModelProb")),
+
+        "best_edge": safe_float(row.get("Edge")),
+        "edge": safe_float(row.get("Edge")),
+        "Edge": safe_float(row.get("Edge")),
+
+        "confidence": safe_float(row.get("Confidence")),
+        "Confidence": safe_float(row.get("Confidence")),
+
+        "power_score": safe_float(row.get("PowerScore")),
+        "PowerScore": safe_float(row.get("PowerScore")),
+
+        "hr_score": safe_float(row.get("HRScore")),
+        "HRScore": safe_float(row.get("HRScore")),
+
+        "ev_score": safe_float(row.get("EVScore")),
+        "EVScore": safe_float(row.get("EVScore")),
+
+        "decision_score": safe_float(row.get("DecisionScore")),
+        "DecisionScore": safe_float(row.get("DecisionScore")),
+
+        "smash_score": safe_float(row.get("SmashScore")),
+        "SmashScore": safe_float(row.get("SmashScore")),
+
+        "pitcher_weakness_score": safe_float(
+            row.get("PitcherScore", row.get("PitcherHRWeaknessScore", 0))
+        ),
+        "pitcher_lineup_weak_spot": safe_float(
+            row.get("PitcherLineupScore", row.get("PitcherLineupWeakSpot", 0))
+        ),
+
+        "grade": safe_str(row.get("Grade", "")),
+        "Grade": safe_str(row.get("Grade", "")),
+
+        "tier": tier_display,
+        "Tier": tier_display,
+        "tier_code": tier_code,
+        "TierCode": tier_code,
+
+        "play": play_display,
+        "Play": play_display,
+        "play_code": play_code,
+        "PlayCode": play_code,
+
+        "reason": safe_str(row.get("Reason", "")),
+        "Reason": safe_str(row.get("Reason", "")),
+
+        "stake": safe_float(row.get("Stake", 0)),
+        "Stake": safe_float(row.get("Stake", 0)),
+
+        "top_hr_rank": safe_str(row.get("TopHRRank", "")),
+        "TopHRRank": safe_str(row.get("TopHRRank", "")),
+
+        "top_edge_rank": safe_str(row.get("TopEdgeRank", "")),
+        "TopEdgeRank": safe_str(row.get("TopEdgeRank", "")),
+
+        "top_prob_rank": safe_str(row.get("TopProbRank", "")),
+        "TopProbRank": safe_str(row.get("TopProbRank", "")),
+
+        "top_smash_rank": safe_str(row.get("TopSmashRank", "")),
+        "TopSmashRank": safe_str(row.get("TopSmashRank", "")),
+    }
+
+
 @app.get("/")
 def home():
     return {"status": "HR model backend running"}
@@ -154,23 +298,7 @@ def home():
 
 @app.get("/api/slate")
 def get_slate():
-    results_path = os.path.join(
-        os.path.dirname(__file__),
-        "..",
-        "data",
-        "hr_model_results.csv"
-    )
-
-    if not os.path.exists(results_path):
-        return {
-            "count": 0,
-            "date": "",
-            "snapshot": "MANUAL",
-            "picks": [],
-        }
-
-    df = pd.read_csv(results_path)
-    df = df.fillna("")
+    df = load_results()
 
     if df.empty:
         return {
@@ -183,58 +311,107 @@ def get_slate():
     picks = []
 
     for _, row in df.iterrows():
-        picks.append({
-            "date": safe_str(row.get("Date", "")),
-            "game": safe_str(row.get("Game", "")),
-            "game_time": safe_str(row.get("GameTime", "")),
-            "game_time_et": safe_str(row.get("GameTimeET", "")),
-            "snapshot": safe_str(row.get("Snapshot", "MANUAL"), "MANUAL"),
-
-            "player": safe_str(row.get("Player", "")),
-            "player_id": safe_str(row.get("player_id", "")),
-            "player_headshot": headshot_url(row.get("player_id", "")),
-            "team": safe_str(row.get("Team", "")),
-            "pitcher": safe_str(row.get("Pitcher", "")),
-            "lineup_spot": safe_str(row.get("LineupSpot", "")),
-            "lineup_source": safe_str(row.get("LineupSource", "")),
-
-            "best_book": safe_str(row.get("BestBook", "")),
-            "best_odds": safe_str(row.get("BestOdds", "")),
-
-            "model_prob": safe_float(row.get("ModelProb")),
-            "raw_model_prob": safe_float(row.get("RawModelProb")),
-            "best_edge": safe_float(row.get("Edge")),
-            "edge": safe_float(row.get("Edge")),
-
-            "confidence": safe_float(row.get("Confidence")),
-            "power_score": safe_float(row.get("PowerScore")),
-            "hr_score": safe_float(row.get("HRScore")),
-            "ev_score": safe_float(row.get("EVScore")),
-            "decision_score": safe_float(row.get("DecisionScore")),
-            "smash_score": safe_float(row.get("SmashScore")),
-
-            "pitcher_weakness_score": safe_float(row.get("PitcherScore", row.get("PitcherHRWeaknessScore", 0))),
-            "pitcher_lineup_weak_spot": safe_float(row.get("PitcherLineupScore", row.get("PitcherLineupWeakSpot", 0))),
-
-            "grade": safe_str(row.get("Grade", "")),
-            "tier": safe_str(row.get("Tier", "")),
-            "play": safe_str(row.get("Play", "")),
-            "stake": safe_float(row.get("Stake", 0)),
-
-            "top_hr_rank": safe_str(row.get("TopHRRank", "")),
-            "top_edge_rank": safe_str(row.get("TopEdgeRank", "")),
-            "top_prob_rank": safe_str(row.get("TopProbRank", "")),
-            "top_smash_rank": safe_str(row.get("TopSmashRank", "")),
-        })
+        picks.append(result_row(row))
 
     latest_date = str(df["Date"].iloc[0]) if "Date" in df.columns else ""
+    latest_snapshot = "MANUAL"
+
+    if "Snapshot" in df.columns:
+        snapshots = df["Snapshot"].astype(str).str.upper().str.strip()
+        for snap in ["LOCK", "ONE_HOUR", "MORNING", "MANUAL"]:
+            if snap in snapshots.values:
+                latest_snapshot = snap
+                break
 
     return {
         "count": len(picks),
         "date": latest_date,
-        "snapshot": "MANUAL",
+        "snapshot": latest_snapshot,
         "picks": picks,
     }
+
+
+@app.get("/today-plays")
+def today_plays():
+    df = load_results()
+
+    if df.empty:
+        return {
+            "count": 0,
+            "date": "",
+            "snapshot": "",
+            "yes_count": 0,
+            "power_bat_count": 0,
+            "value_lean_count": 0,
+            "total_stake": 0,
+            "plays": [],
+            "yes": [],
+            "power_bats": [],
+            "value_leans": [],
+        }
+
+    df = df.copy()
+
+    for col in ["PlayCode", "Play", "Stake", "Edge", "Confidence", "HRScore", "DecisionScore", "SmashScore"]:
+        if col not in df.columns:
+            df[col] = ""
+
+    df["PlayCode"] = df["PlayCode"].fillna("").astype(str).str.upper().str.strip()
+    df["Play"] = df["Play"].fillna("").astype(str).str.upper().str.strip()
+
+    official = df[
+        (df["PlayCode"].isin(["YES", "POWER_BAT", "VALUE_LEAN"]))
+        | (df["Play"].str.contains("YES", na=False))
+        | (df["Play"].str.contains("POWER BAT", na=False))
+        | (df["Play"].str.contains("VALUE LEAN", na=False))
+    ].copy()
+
+    official["Stake"] = pd.to_numeric(official["Stake"], errors="coerce").fillna(0)
+    official["Edge"] = pd.to_numeric(official["Edge"], errors="coerce").fillna(0)
+    official["Confidence"] = pd.to_numeric(official["Confidence"], errors="coerce").fillna(0)
+    official["HRScore"] = pd.to_numeric(official["HRScore"], errors="coerce").fillna(0)
+    official["DecisionScore"] = pd.to_numeric(official["DecisionScore"], errors="coerce").fillna(0)
+    official["SmashScore"] = pd.to_numeric(official["SmashScore"], errors="coerce").fillna(0)
+
+    official = official.sort_values(
+        by=["PlayCode", "HRScore", "DecisionScore", "SmashScore", "Edge"],
+        ascending=[True, False, False, False, False],
+    )
+
+    plays = [result_row(row) for _, row in official.iterrows()]
+
+    yes = [p for p in plays if p.get("PlayCode") == "YES"]
+    power_bats = [p for p in plays if p.get("PlayCode") == "POWER_BAT"]
+    value_leans = [p for p in plays if p.get("PlayCode") == "VALUE_LEAN"]
+
+    latest_date = str(df["Date"].iloc[0]) if "Date" in df.columns and not df.empty else ""
+    latest_snapshot = "MANUAL"
+
+    if "Snapshot" in df.columns:
+        snapshots = df["Snapshot"].astype(str).str.upper().str.strip()
+        for snap in ["LOCK", "ONE_HOUR", "MORNING", "MANUAL"]:
+            if snap in snapshots.values:
+                latest_snapshot = snap
+                break
+
+    return {
+        "count": len(plays),
+        "date": latest_date,
+        "snapshot": latest_snapshot,
+        "yes_count": len(yes),
+        "power_bat_count": len(power_bats),
+        "value_lean_count": len(value_leans),
+        "total_stake": round(sum(p.get("Stake", 0) for p in plays), 2),
+        "plays": plays,
+        "yes": yes,
+        "power_bats": power_bats,
+        "value_leans": value_leans,
+    }
+
+
+@app.get("/api/today-plays")
+def api_today_plays():
+    return today_plays()
 
 
 @app.get("/api/model-health")
@@ -582,6 +759,7 @@ def snapshot_analytics():
     usable = [s for s in snapshots if s["plays"] > 0]
 
     best_snapshot = {}
+
     if usable:
         best_snapshot = sorted(
             usable,
@@ -787,6 +965,7 @@ def feature_analytics():
     usable = [f for f in features if f["plays"] >= 5]
 
     best_feature = {}
+
     if usable:
         best_feature = sorted(
             usable,

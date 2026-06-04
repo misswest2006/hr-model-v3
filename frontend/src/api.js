@@ -17,6 +17,11 @@ export const fetchSlate = async () => {
   return res.data;
 };
 
+export const fetchTodayPlays = async () => {
+  const res = await axios.get(`${API_BASE}/today-plays`);
+  return res.data;
+};
+
 export const fetchModelHealth = async () => {
   const res = await axios.get(`${API_BASE}/api/model-health`);
   return res.data;

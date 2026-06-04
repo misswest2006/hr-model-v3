@@ -9,6 +9,7 @@ import FeatureAnalytics from "./FeatureAnalytics";
 import AutoTuner from "./AutoTuner";
 import EvAnalytics from "./EvAnalytics";
 import TeamAnalytics from "./TeamAnalytics";
+import TodayPlays from "./TodayPlays";
 
 const FOUR_HOURS = 14400000;
 
@@ -31,7 +32,10 @@ function edgePercent(value) {
 
 function cleanPlay(play) {
   if (!play) return "No";
-  return play.includes("YES") ? "Yes 🔥" : "No";
+  if (play.includes("YES")) return "Yes 🔥";
+  if (play.includes("POWER")) return "Power Bat 💣";
+  if (play.includes("VALUE")) return "Value Lean 👀";
+  return play;
 }
 
 function initials(name) {
@@ -61,7 +65,11 @@ function gradeClass(grade) {
 }
 
 function playClass(play) {
-  return play?.includes("YES") ? "play-value play-yes" : "play-value play-no";
+  if (!play) return "play-value play-no";
+  if (play.includes("YES")) return "play-value play-yes";
+  if (play.includes("POWER")) return "play-value play-yes";
+  if (play.includes("VALUE")) return "play-value play-yes";
+  return "play-value play-no";
 }
 
 function hrScore(pick) {
@@ -73,31 +81,45 @@ function decisionScore(pick) {
 }
 
 function pickLadder(pick) {
-  const edge = Number(pick.best_edge || 0);
-  const confidence = Number(pick.confidence || 0);
-  const weakness = Number(pick.pitcher_weakness_score || 0);
-  const spotMatch = Number(pick.pitcher_lineup_weak_spot || 0);
-  const modelProb = Number(pick.model_prob || 0);
-  const lineup = Number(pick.lineup_spot || 0);
-  const backendPlay = String(pick.play || "");
-  const backendTier = String(pick.tier || "");
-  const backendGrade = String(pick.grade || "");
-  const backendDecision = Number(pick.decision_score || 0);
-  const backendHR = Number(pick.hr_score || 0);
+  const edge = Number(pick?.best_edge || 0);
+  const confidence = Number(pick?.confidence || 0);
+  const weakness = Number(pick?.pitcher_weakness_score || 0);
+  const spotMatch = Number(pick?.pitcher_lineup_weak_spot || 0);
+  const modelProb = Number(pick?.model_prob || 0);
+  const lineup = Number(pick?.lineup_spot || 0);
+  const backendPlay = String(pick?.play || "");
+  const backendTier = String(pick?.tier || "");
+  const backendGrade = String(pick?.grade || "");
+  const backendDecision = Number(pick?.decision_score || 0);
+  const backendHR = Number(pick?.hr_score || 0);
 
   if (backendPlay.includes("YES")) {
     return {
       label: "MODEL YES 🔥",
       rank: 5,
-      reason: `${backendGrade || "Grade"} ${backendTier || ""} | HR ${Math.round(backendHR)} | Decision ${Math.round(backendDecision)}`,
+      reason: `${backendGrade || "Grade"} ${backendTier || ""} | HR ${Math.round(
+        backendHR
+      )} | Decision ${Math.round(backendDecision)}`,
+    };
+  }
+
+  if (backendPlay.includes("POWER")) {
+    return {
+      label: "POWER BAT 💣",
+      rank: 4,
+      reason: `${backendGrade || "Grade"} ${backendTier || ""} | HR ${Math.round(
+        backendHR
+      )} | Decision ${Math.round(backendDecision)}`,
     };
   }
 
   if (backendPlay.includes("LEAN")) {
     return {
-      label: "LEAN ✅",
-      rank: 4,
-      reason: `${backendGrade || "Grade"} ${backendTier || ""} | HR ${Math.round(backendHR)} | Decision ${Math.round(backendDecision)}`,
+      label: "VALUE LEAN 👀",
+      rank: 3,
+      reason: `${backendGrade || "Grade"} ${backendTier || ""} | HR ${Math.round(
+        backendHR
+      )} | Decision ${Math.round(backendDecision)}`,
     };
   }
 
@@ -122,11 +144,7 @@ function pickLadder(pick) {
     };
   }
 
-  if (
-    hasElitePitcherCombo &&
-    hasPositiveEdge &&
-    hasOkayConfidence
-  ) {
+  if (hasElitePitcherCombo && hasPositiveEdge && hasOkayConfidence) {
     return {
       label: "STRONG LOOK 💣",
       rank: 4,
@@ -134,11 +152,7 @@ function pickLadder(pick) {
     };
   }
 
-  if (
-    hasStrongPitcherCombo &&
-    hasPositiveEdge &&
-    confidence >= 60
-  ) {
+  if (hasStrongPitcherCombo && hasPositiveEdge && confidence >= 60) {
     return {
       label: "SPRINKLE ONLY ⚡",
       rank: 3,
@@ -146,11 +160,7 @@ function pickLadder(pick) {
     };
   }
 
-  if (
-    modelProb >= 0.20 &&
-    confidence >= 75 &&
-    hasPositiveEdge
-  ) {
+  if (modelProb >= 0.2 && confidence >= 75 && hasPositiveEdge) {
     return {
       label: "WATCH 👀",
       rank: 2,
@@ -218,7 +228,7 @@ function PlayerCard({ pick, index }) {
 
         <div className="odds-logo-block">
           <SportsbookLogo book={pick.best_book} />
-          <strong>{pick.best_odds}</strong>
+          <strong>{pick.best_odds || "-"}</strong>
         </div>
       </div>
 
@@ -293,7 +303,9 @@ function ModelPlayOfDay({ pick }) {
 
           <div>
             <h2>{pick.player}</h2>
-            <p>{pick.team} vs {pick.pitcher}</p>
+            <p>
+              {pick.team} vs {pick.pitcher}
+            </p>
 
             <div className="model-pills">
               <span className={gradeClass(pick.grade)}>Grade: {pick.grade}</span>
@@ -375,7 +387,7 @@ function YesPlaysSection({ yesPicks }) {
     <section className="team-showcase-section">
       <div className="page-title">
         <h2>🔥 YES PLAYS 🔥</h2>
-        <p>YES, POWER BAT, and LEAN plays ranked by HR Score first, then Decision Score.</p>
+        <p>YES plays ranked by HR Score first, then Decision Score.</p>
       </div>
 
       {tracker && (
@@ -445,7 +457,9 @@ function ResultsCenter() {
             <span>{r.player}</span>
             <span>{r.team}</span>
             <span>{r.snapshot}</span>
-            <span>{r.book} {r.odds}</span>
+            <span>
+              {r.book} {r.odds}
+            </span>
             <span>{r.confidence}</span>
             <span>{r.grade}</span>
             <span>{r.result}</span>
@@ -597,6 +611,7 @@ export default function App() {
 
         <nav>
           <button className={activeTab === "dashboard" ? "active" : ""} onClick={() => switchTab("dashboard")}>🏠 Dashboard</button>
+          <button className={activeTab === "today" ? "active" : ""} onClick={() => switchTab("today")}>📱 Live Today</button>
           <button className={activeTab === "smash" ? "active" : ""} onClick={() => switchTab("smash")}>🔥 Smash Spot</button>
           <button className={activeTab === "yes" ? "active" : ""} onClick={() => switchTab("yes")}>🔥 YES Plays</button>
           <button className={activeTab === "results" ? "active" : ""} onClick={() => switchTab("results")}>📊 Results Center</button>
@@ -628,7 +643,7 @@ export default function App() {
           <div className="hero-diamond hero-right">💎</div>
         </header>
 
-        {activeTab !== "health" && (
+        {activeTab !== "health" && activeTab !== "today" && (
           <>
             <section className="stats-grid">
               <StatCard icon="💎" label="Total Graded Plays" value={validPicks.length} />
@@ -665,12 +680,15 @@ export default function App() {
         {activeTab !== "health" &&
           activeTab !== "yes" &&
           activeTab !== "results" &&
-          activeTab !== "smash" && (
+          activeTab !== "smash" &&
+          activeTab !== "today" && (
             <ModelPlayOfDay pick={modelPlay} />
           )}
 
         {activeTab === "health" ? (
           <ModelHealth />
+        ) : activeTab === "today" ? (
+          <TodayPlays />
         ) : loading ? (
           <div className="empty-state">Loading slate...</div>
         ) : validPicks.length === 0 ? (
