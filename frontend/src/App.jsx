@@ -10,6 +10,10 @@ import AutoTuner from "./AutoTuner";
 import EvAnalytics from "./EvAnalytics";
 import TeamAnalytics from "./TeamAnalytics";
 import TodayPlays from "./TodayPlays";
+import YesPerformanceTracker from "./YesPerformanceTracker";
+import OfficialCard from "./OfficialCard";
+import BankrollTracker from "./BankrollTracker";
+import SignalLab from "./SignalLab";
 
 const FOUR_HOURS = 14400000;
 
@@ -62,6 +66,35 @@ function gradeClass(grade) {
   if (grade === "B") return "grade-value grade-b";
   if (grade === "C") return "grade-value grade-c";
   return "grade-value grade-d";
+}
+
+
+function formatTier(tier) {
+  const raw = String(tier || "WATCH").trim();
+  const clean = raw
+    .replace("ðŸ‘€", "")
+    .replace("ðŸ”¥", "")
+    .replace("ðŸ’£", "")
+    .replace("ðŸ‘‘", "")
+    .replace("ðŸ’Ž", "")
+    .replace("👀", "")
+    .replace("🔥", "")
+    .replace("💣", "")
+    .replace("👑", "")
+    .replace("💎", "")
+    .trim()
+    .toUpperCase();
+
+  if (clean.includes("GOD")) return "GOD TIER 👑";
+  if (clean.includes("ELITE")) return "ELITE 💎";
+  if (clean.includes("STRONG")) return "STRONG 🔥";
+  if (clean.includes("WATCH")) return "WATCH 👀";
+  if (clean.includes("LOW")) return "LOW";
+  if (clean.includes("TIER 1")) return "TIER 1 💎";
+  if (clean.includes("TIER 2")) return "TIER 2 🔥";
+  if (clean.includes("MATCHUP")) return "MATCHUP MONSTER 💣";
+
+  return raw || "WATCH 👀";
 }
 
 function playClass(play) {
@@ -242,12 +275,11 @@ function PlayerCard({ pick, index }) {
       <div className="rank-badge-row">
         <span className="edge-badge">{ladder.label}</span>
         <span className="prob-badge">Decision {dScore}</span>
-        <span className="tier-badge">{pick.tier || "WATCH"}</span>
+        <span className="tier-badge">{formatTier(pick.tier)}</span>
       </div>
 
       <div className="metric-grid">
         <Metric label="Pick Ladder" value={ladder.label} />
-        <Metric label="Decision Score" value={dScore} />
         <Metric label="Reason" value={ladder.reason} />
         <Metric label="Model Prob" value={percent(pick.model_prob)} />
         <Metric
@@ -260,16 +292,13 @@ function PlayerCard({ pick, index }) {
         <Metric label="Pitcher Spot Match" value={`🎯 ${pick.pitcher_lineup_weak_spot ?? 0}/10`} />
         <Metric label="HR Score" value={hrScore(pick)} />
         <Metric label="EV Score" value={pick.ev_score ?? "-"} />
-        <Metric label="Decision Score" value={decisionScore(pick)} />
         <Metric label="Power Score" value={pick.power_score ?? "-"} />
         <Metric label="Smash Score" value={pick.smash_score ?? "-"} />
-        <Metric label="Lineup Boost" value={pick.lineup_boost ?? "-"} />
         <Metric label="Stake" value={`${pick.stake || 0}u`} />
       </div>
 
       <div className="player-footer">
         <span className={gradeClass(pick.grade)}>Grade: {pick.grade}</span>
-        <span className={playClass(pick.play)}>Play: {cleanPlay(pick.play)}</span>
       </div>
     </article>
   );
@@ -310,14 +339,13 @@ function ModelPlayOfDay({ pick }) {
             <div className="model-pills">
               <span className={gradeClass(pick.grade)}>Grade: {pick.grade}</span>
               <span className={playClass(pick.play)}>Play: {cleanPlay(pick.play)}</span>
-              <span className="tier-badge">{ladder.label}</span>
+              <span className="tier-badge">{formatTier(ladder.label)}</span>
             </div>
           </div>
         </div>
       </div>
 
       <div className="model-metrics">
-        <Metric label="Decision Score" value={dScore} />
         <Metric label="Pick Ladder" value={ladder.label} />
         <Metric label="Model Prob" value={percent(pick.model_prob)} />
         <Metric label="Edge" value={edgePercent(pick.best_edge)} />
@@ -612,9 +640,13 @@ export default function App() {
         <nav>
           <button className={activeTab === "dashboard" ? "active" : ""} onClick={() => switchTab("dashboard")}>🏠 Dashboard</button>
           <button className={activeTab === "today" ? "active" : ""} onClick={() => switchTab("today")}>📱 Live Today</button>
+          <button className={activeTab === "official" ? "active" : ""} onClick={() => switchTab("official")}>🎯 Official Card</button>
           <button className={activeTab === "smash" ? "active" : ""} onClick={() => switchTab("smash")}>🔥 Smash Spot</button>
           <button className={activeTab === "yes" ? "active" : ""} onClick={() => switchTab("yes")}>🔥 YES Plays</button>
           <button className={activeTab === "results" ? "active" : ""} onClick={() => switchTab("results")}>📊 Results Center</button>
+          <button className={activeTab === "performance" ? "active" : ""} onClick={() => switchTab("performance")}>📒 Performance Tracker</button>
+          <button className={activeTab === "bankroll" ? "active" : ""} onClick={() => switchTab("bankroll")}>💰 Bankroll Tracker</button>
+          <button className={activeTab === "signalLab" ? "active" : ""} onClick={() => switchTab("signalLab")}>🧪 Signal Lab</button>
           <button className={activeTab === "top" ? "active" : ""} onClick={() => switchTab("top")}>🔥 Top Players</button>
           <button className={activeTab === "health" ? "active" : ""} onClick={() => switchTab("health")}>🩺 Model Health</button>
           <button className={activeTab === "confidence" ? "active" : ""} onClick={() => switchTab("confidence")}>📈 Confidence Analytics</button>
@@ -689,6 +721,8 @@ export default function App() {
           <ModelHealth />
         ) : activeTab === "today" ? (
           <TodayPlays />
+        ) : activeTab === "official" ? (
+          <OfficialCard />
         ) : loading ? (
           <div className="empty-state">Loading slate...</div>
         ) : validPicks.length === 0 ? (
@@ -699,6 +733,12 @@ export default function App() {
           <YesPlaysSection yesPicks={yesPicks} />
         ) : activeTab === "results" ? (
           <ResultsCenter />
+        ) : activeTab === "performance" ? (
+          <YesPerformanceTracker />
+        ) : activeTab === "bankroll" ? (
+          <BankrollTracker />
+        ) : activeTab === "signalLab" ? (
+          <SignalLab />
         ) : activeTab === "confidence" ? (
           <ConfidenceAnalytics />
         ) : activeTab === "snapshot" ? (
